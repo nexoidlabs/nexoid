@@ -1,0 +1,31 @@
+{
+  "network": "sepolia",
+  "rpcUrl": "https://ethereum-sepolia-rpc.publicnode.com",
+  "operator": {
+    "seedPhrase": "REPLACE_WITH_SEED_PHRASE",
+    "safeAddress": "REPLACE_AFTER_DEPLOYMENT"
+  },
+  "agents": [
+    {
+      "name": "Agent Alpha",
+      "index": 1,
+      "allowance": "100",
+      "resetMinutes": 1440
+    },
+    {
+      "name": "Agent Beta",
+      "index": 2,
+      "allowance": "50",
+      "resetMinutes": 0
+    }
+  ],
+  "contracts": {
+    "identityRegistry": "REPLACE_AFTER_DEPLOYMENT",
+    "delegationRegistry": "REPLACE_AFTER_DEPLOYMENT"
+  },
+  "token": {
+    "address": "0xaA8E23Fb1079EA71e0a56F48a2aA51851D8433D0",
+    "symbol": "USDT",
+    "decimals": 6
+  }
+}

@@ -1,0 +1,41 @@
+# Dependencies
+**/node_modules/
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+.next/
+
+# Hardhat
+packages/nx-core/artifacts/
+packages/nx-core/cache/
+packages/nx-core/typechain-types/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test / Coverage
+coverage/
+.nyc_output/
+
+# Docker
+infra/docker/pgdata/
+
+# Logs
+*.log
+
+# Marketing intelligence reports (generated daily, not versioned)
+business/marketing/reports/

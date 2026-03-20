@@ -1,0 +1,43 @@
+{
+  "name": "@nexoid/nx-core",
+  "version": "0.2.0",
+  "description": "On-chain identity, wallets, and delegation primitives for Nexoid",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./abi": {
+      "types": "./dist/abi/index.d.ts",
+      "import": "./dist/abi/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "build:contracts": "hardhat compile",
+    "build:all": "hardhat compile && tsc",
+    "test": "vitest run",
+    "test:contracts": "hardhat test",
+    "test:all": "hardhat test && vitest run",
+    "test:contracts": "hardhat test",
+    "test:ts": "vitest run",
+    "lint": "eslint src/",
+    "clean": "rm -rf dist artifacts cache typechain-types",
+    "typecheck": "tsc --noEmit",
+    "deploy:local": "tsx deploy/003_deploy_all.ts",
+    "deploy:sepolia": "HARDHAT_NETWORK=sepolia tsx deploy/003_deploy_all.ts",
+    "deploy:mainnet": "HARDHAT_NETWORK=ethereum tsx deploy/003_deploy_all.ts"
+  },
+  "dependencies": {
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "hardhat": "^2.22.0",
+    "typescript": "~5.7.0",
+    "vitest": "^3.0.0"
+  }
+}
