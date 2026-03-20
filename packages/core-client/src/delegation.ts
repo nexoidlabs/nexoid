@@ -1,91 +1,95 @@
 /**
- * Delegation operations for the NexoidClient.
- * Wraps nx-core delegation functions with audit emission.
+ * Agent scope operations for the NexoidClient.
+ * Wraps nx-core agent-scope functions with NexoidModule integration.
  */
 
 import {
-  delegateWithScope as delegateOnChain,
-  revokeDelegation as revokeOnChain,
-  validateDelegation as validateOnChain,
-  getDelegation as getDelegationOnChain,
+  updateAgentScope as updateScopeOnChain,
+  suspendAgent as suspendOnChain,
+  revokeAgent as revokeOnChain,
+  reactivateAgent as reactivateOnChain,
+  isValidAgent as isValidOnChain,
+  getAgentRecord as getRecordOnChain,
   computeScopeHash,
-  didToAddress,
-  addressToDID,
-  type DelegationOps,
-  type DelegationRecord,
-  type NexoidDID,
+  type AgentOps,
+  type AgentRecord,
 } from '@nexoid/nx-core';
 import type {
-  DelegateOpts,
-  DelegationResult,
+  UpdateScopeOpts,
+  ScopeUpdateResult,
   ValidationResult,
 } from './types.js';
 
 /**
- * Create a scoped delegation from operator to agent.
+ * Update scope, credential, and expiry for an agent via NexoidModule.
  */
-export async function delegate(
-  delegationOps: DelegationOps,
-  issuerDid: NexoidDID,
-  opts: DelegateOpts
-): Promise<DelegationResult> {
-  const subjectAddress = didToAddress(opts.agentDid);
-
-  // Create a placeholder credential hash (in production, this would be the VC hash)
+export async function updateAgentScope(
+  agentOps: AgentOps,
+  opts: UpdateScopeOpts
+): Promise<ScopeUpdateResult> {
   const scopeHash = computeScopeHash(opts.scope);
   const credentialHash = scopeHash; // Simplified for v0.2
 
-  const txHash = await delegateOnChain(delegationOps, {
-    subject: subjectAddress,
+  const txHash = await updateScopeOnChain(agentOps, {
+    agentSafe: opts.agentSafe,
+    scopeHash,
     credentialHash,
-    scope: opts.scope,
     validUntil: BigInt(Math.floor(opts.validUntil.getTime() / 1000)),
-    parentDelegationId: opts.parentDelegationId
-      ? BigInt(opts.parentDelegationId)
-      : undefined,
   });
 
   return {
-    delegationId: '0', // Will be resolved from tx receipt in production
     txHash,
     scope: opts.scope,
   };
 }
 
 /**
- * Revoke a delegation (O(1) gas — chain-breaking design).
+ * Revoke an agent permanently via NexoidModule.
  */
-export async function revoke(
-  delegationOps: DelegationOps,
-  actorDid: NexoidDID,
-  delegationId: string
+export async function revokeAgent(
+  agentOps: AgentOps,
+  agentSafe: `0x${string}`
 ): Promise<`0x${string}`> {
-  const txHash = await revokeOnChain(delegationOps, BigInt(delegationId));
-  return txHash;
+  return revokeOnChain(agentOps, agentSafe);
 }
 
 /**
- * Validate a delegation chain from agent back to trust anchor.
+ * Suspend an active agent via NexoidModule.
  */
-export async function validateDelegation(
-  delegationOps: DelegationOps,
-  delegationId: string
+export async function suspendAgent(
+  agentOps: AgentOps,
+  agentSafe: `0x${string}`
+): Promise<`0x${string}`> {
+  return suspendOnChain(agentOps, agentSafe);
+}
+
+/**
+ * Reactivate a suspended agent via NexoidModule.
+ */
+export async function reactivateAgent(
+  agentOps: AgentOps,
+  agentSafe: `0x${string}`
+): Promise<`0x${string}`> {
+  return reactivateOnChain(agentOps, agentSafe);
+}
+
+/**
+ * Check if an agent is valid (Active status and not expired).
+ */
+export async function isValidAgent(
+  agentOps: AgentOps,
+  agentSafe: `0x${string}`
 ): Promise<ValidationResult> {
-  const result = await validateOnChain(delegationOps, BigInt(delegationId));
-  return {
-    valid: result.valid,
-    depth: result.depth,
-  };
+  const valid = await isValidOnChain(agentOps, agentSafe);
+  return { valid };
 }
 
 /**
- * List delegations for a given DID.
- * Note: Requires off-chain indexing. In v0.2, tracks via events.
+ * Get the full agent record.
  */
-export async function listDelegations(
-  _delegationOps: DelegationOps,
-  _did: NexoidDID
-): Promise<DelegationRecord[]> {
-  // TODO: Implement via event indexing or database
-  return [];
+export async function getAgentRecord(
+  agentOps: AgentOps,
+  agentSafe: `0x${string}`
+): Promise<AgentRecord> {
+  return getRecordOnChain(agentOps, agentSafe);
 }

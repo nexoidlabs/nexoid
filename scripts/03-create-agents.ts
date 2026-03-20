@@ -20,7 +20,7 @@ async function main() {
   const client = new NexoidClient({
     rpcUrl: config.rpcUrl,
     registryAddress: config.contracts.identityRegistry,
-    delegationRegistryAddress: config.contracts.delegationRegistry,
+    nexoidModuleAddress: config.contracts.nexoidModule,
     privateKey: operator.privateKey,
   });
 

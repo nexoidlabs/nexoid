@@ -12,7 +12,7 @@ ${chalk.bold.underline('QUICK START')}
   ${chalk.dim('# 2. You set up your CLI and deploy a Safe wallet')}
   ${chalk.cyan('$')} export NEXOID_PRIVATE_KEY=0x...
   ${chalk.cyan('$')} nxcli init --rpc-url https://mainnet.base.org \\
-       --registry 0x... --delegation-registry 0x...
+       --registry 0x... --nexoid-module 0x...
   ${chalk.cyan('$')} nxcli register                  ${chalk.dim('# verify identity + deploy Safe')}
   ${chalk.cyan('$')} nxcli whoami                     ${chalk.dim('# verify your identity')}
 
@@ -21,7 +21,7 @@ ${chalk.bold.underline('SETUP & CONFIG')}
   ${chalk.yellow('nxcli init')}                       Initialize config file
       --rpc-url <url>                 Ethereum network RPC endpoint
       --registry <0x...>              IdentityRegistry contract address
-      --delegation-registry <0x...>   DelegationRegistry contract address
+      --nexoid-module <0x...>         NexoidModule contract address (required)
       --safe <0x...>                  Operator Safe wallet address
       --token <0x...>                 USDT token address (optional)
       --mode operator|agent           Profile mode (default: operator)
@@ -47,21 +47,23 @@ ${chalk.bold.underline('AGENT MANAGEMENT')} ${chalk.dim('(operator only)')}
 
 ${chalk.bold.underline('DELEGATION')}
 
-  ${chalk.yellow('nxcli delegate')} <agentDid>        Create a scoped delegation ${chalk.dim('(operator only)')}
+  ${chalk.yellow('nxcli delegate')} <agentSafe>        Create/update agent scope ${chalk.dim('(operator only)')}
       --budget <amount>               Budget limit (USDT)
       --budget-period daily|weekly|monthly  (default: monthly)
       --max-tx <amount>               Max per-transaction amount (USDT)
-      --depth <n>                     Max delegation depth (default: 1)
       --valid-until <ISO>             Expiry date (default: 30 days)
 
-  ${chalk.yellow('nxcli delegation validate')} <id>   Check if a delegation is valid
-  ${chalk.yellow('nxcli delegation revoke')} <id>     Revoke a delegation ${chalk.dim('(operator only)')}
+  ${chalk.yellow('nxcli delegation validate')} <agentSafe>   Check if an agent is valid
+  ${chalk.yellow('nxcli delegation revoke')} <agentSafe>     Revoke an agent ${chalk.dim('(operator only)')}
+  ${chalk.yellow('nxcli delegation suspend')} <agentSafe>    Suspend an agent ${chalk.dim('(operator only)')}
+  ${chalk.yellow('nxcli delegation reactivate')} <agentSafe> Reactivate a suspended agent ${chalk.dim('(operator only)')}
 
   ${chalk.dim('Examples:')}
-    ${chalk.cyan('$')} nxcli delegate did:nexoid:eth:0xabc...123 \\
+    ${chalk.cyan('$')} nxcli delegate 0xAgentSafe...123 \\
          --budget 500 --max-tx 50
-    ${chalk.cyan('$')} nxcli delegation validate 42
-    ${chalk.cyan('$')} nxcli delegation revoke 42
+    ${chalk.cyan('$')} nxcli delegation validate 0xAgentSafe...123
+    ${chalk.cyan('$')} nxcli delegation revoke 0xAgentSafe...123
+    ${chalk.cyan('$')} nxcli delegation suspend 0xAgentSafe...123
 
 ${chalk.bold.underline('FINANCIAL')}
 
@@ -90,7 +92,7 @@ ${chalk.bold.underline('MODES')}
   ${chalk.bold('agent')} — restricted: balance, send, get-allowance, validate, show/disclose credentials
 
   Set mode in config profile or override with --mode flag.
-  Agent mode blocks: init, register, agent create/revoke, delegate, delegation revoke, set-allowance
+  Agent mode blocks: init, register, agent create/revoke, delegate, delegation revoke/suspend/reactivate, set-allowance
 
 ${chalk.bold.underline('GLOBAL FLAGS')}
 
@@ -114,7 +116,7 @@ ${chalk.bold.underline('ENVIRONMENT VARIABLES')}
   NEXOID_PRIVATE_KEY             Operator/agent private key (required, never in config)
   NEXOID_RPC_URL                 Override RPC URL
   NEXOID_REGISTRY                Override IdentityRegistry address
-  NEXOID_DELEGATION_REGISTRY     Override DelegationRegistry address
+  NEXOID_MODULE                  Override NexoidModule address
   NEXOID_SAFE                    Override Safe wallet address
   NEXOID_TOKEN                   Override USDT token address
   NEXOID_MODE                    Override mode (operator|agent)

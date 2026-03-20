@@ -5,16 +5,15 @@ import { requireOperatorMode } from '../mode.js';
 import type { AgentScope, BudgetLimit, MaxTransactionAmount } from '@nexoid/nx-core';
 
 export function registerDelegationCommands(program: Command): void {
-  // nxcli delegate <agentDid>
+  // nxcli delegate <agentSafe>
   program
-    .command('delegate <agentDid>')
-    .description('Create a scoped delegation to an agent')
+    .command('delegate <agentSafe>')
+    .description('Create or update a scoped delegation to an agent Safe')
     .requiredOption('--budget <amount>', 'Budget limit amount')
     .option('--budget-period <period>', 'Budget period: daily, weekly, or monthly', 'monthly')
     .requiredOption('--max-tx <amount>', 'Max single transaction amount')
-    .option('--depth <n>', 'Max delegation depth', '1')
     .option('--valid-until <iso>', 'Expiry date (ISO 8601)')
-    .action(async (agentDid: string, opts, cmd) => {
+    .action(async (agentSafe: string, opts, cmd) => {
       const globalOpts = cmd.optsWithGlobals();
       requireOperatorMode(globalOpts);
 
@@ -40,7 +39,6 @@ export function registerDelegationCommands(program: Command): void {
         budgetLimit,
         maxTransactionAmount,
         allowedTools: [],
-        delegationDepth: parseInt(opts.depth, 10),
       };
 
       const validUntil = opts.validUntil
@@ -51,47 +49,71 @@ export function registerDelegationCommands(program: Command): void {
         error(`Invalid date "${opts.validUntil}". Use ISO 8601 format.`, 'validation');
       }
 
-      const result = await client.delegate({
-        agentDid: agentDid as `did:nexoid:eth:${string}`,
+      const result = await client.updateAgentScope({
+        agentSafe: agentSafe as `0x${string}`,
         scope,
         validUntil,
       });
 
       kv({
-        delegationId: result.delegationId,
         txHash: result.txHash,
       });
-      if (!isJsonMode()) success(`Delegation created for ${agentDid}`);
+      if (!isJsonMode()) success(`Agent scope updated for ${agentSafe}`);
     });
 
-  // nxcli delegation validate/revoke
+  // nxcli delegation validate/revoke/suspend/reactivate
   const delegationCmd = program
     .command('delegation')
     .description('Delegation management');
 
   delegationCmd
-    .command('validate <id>')
-    .description('Validate a delegation by ID')
-    .action(async (id: string, _, cmd) => {
+    .command('validate <agentSafe>')
+    .description('Validate an agent by Safe address')
+    .action(async (agentSafe: string, _, cmd) => {
       const globalOpts = cmd.optsWithGlobals();
       const client = buildClient(globalOpts.profile);
-      const result = await client.validateDelegation(id);
+      const result = await client.isValidAgent(agentSafe as `0x${string}`);
       kv({
         valid: String(result.valid),
-        depth: String(result.depth),
       });
     });
 
   delegationCmd
-    .command('revoke <id>')
-    .description('Revoke a delegation (O(1) chain-breaking)')
-    .action(async (id: string, _, cmd) => {
+    .command('revoke <agentSafe>')
+    .description('Revoke an agent by Safe address')
+    .action(async (agentSafe: string, _, cmd) => {
       const globalOpts = cmd.optsWithGlobals();
       requireOperatorMode(globalOpts);
 
       const client = buildClient(globalOpts.profile, globalOpts.dryRun);
-      const txHash = await client.revoke(id);
+      const txHash = await client.revokeAgent(agentSafe as `0x${string}`);
       kv({ txHash });
-      if (!isJsonMode()) success(`Delegation ${id} revoked.`);
+      if (!isJsonMode()) success(`Agent ${agentSafe} revoked.`);
+    });
+
+  delegationCmd
+    .command('suspend <agentSafe>')
+    .description('Suspend an agent by Safe address')
+    .action(async (agentSafe: string, _, cmd) => {
+      const globalOpts = cmd.optsWithGlobals();
+      requireOperatorMode(globalOpts);
+
+      const client = buildClient(globalOpts.profile, globalOpts.dryRun);
+      const txHash = await client.suspendAgent(agentSafe as `0x${string}`);
+      kv({ txHash });
+      if (!isJsonMode()) success(`Agent ${agentSafe} suspended.`);
+    });
+
+  delegationCmd
+    .command('reactivate <agentSafe>')
+    .description('Reactivate a suspended agent by Safe address')
+    .action(async (agentSafe: string, _, cmd) => {
+      const globalOpts = cmd.optsWithGlobals();
+      requireOperatorMode(globalOpts);
+
+      const client = buildClient(globalOpts.profile, globalOpts.dryRun);
+      const txHash = await client.reactivateAgent(agentSafe as `0x${string}`);
+      kv({ txHash });
+      if (!isJsonMode()) success(`Agent ${agentSafe} reactivated.`);
     });
 }

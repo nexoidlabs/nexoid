@@ -232,7 +232,7 @@ export async function deployAgentSafe(
     const registerData = encodeFunctionData({
       abi: NexoidModuleABI,
       functionName: 'registerAgentSafe',
-      args: [agentSafeAddress, agentEOA],
+      args: [agentSafeAddress, agentEOA, '0x' + '0'.repeat(64) as `0x${string}`, '0x' + '0'.repeat(64) as `0x${string}`, 0n],
     });
 
     const registerTx = await operatorKit.createTransaction({
@@ -260,7 +260,7 @@ export async function getAgentSafes(
   publicClient: PublicClient,
   nexoidModuleAddress: `0x${string}`,
   operatorSafeAddress: `0x${string}`
-): Promise<Array<{ agentSafe: `0x${string}`; agentEOA: `0x${string}`; createdAt: bigint }>> {
+): Promise<Array<{ agentSafe: `0x${string}`; agentEOA: `0x${string}`; createdAt: bigint; scopeHash: `0x${string}`; credentialHash: `0x${string}`; validUntil: bigint; status: number }>> {
   const result = await publicClient.readContract({
     address: nexoidModuleAddress,
     abi: NexoidModuleABI,
@@ -268,7 +268,7 @@ export async function getAgentSafes(
     args: [operatorSafeAddress],
   });
 
-  return (result as Array<{ agentSafe: `0x${string}`; agentEOA: `0x${string}`; createdAt: bigint }>);
+  return (result as Array<{ agentSafe: `0x${string}`; agentEOA: `0x${string}`; createdAt: bigint; scopeHash: `0x${string}`; credentialHash: `0x${string}`; validUntil: bigint; status: number }>);
 }
 
 /**

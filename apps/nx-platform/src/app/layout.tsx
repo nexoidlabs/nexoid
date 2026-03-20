@@ -3,6 +3,7 @@ import "./globals.css";
 import { Providers } from "./providers";
 import { WalletButton } from "./wallet-button";
 import { ThemeToggle } from "./theme-toggle";
+import { NetworkSelector } from "./network-selector";
 import { Sidebar } from "./sidebar";
 
 export const metadata: Metadata = {
@@ -46,6 +47,7 @@ export default function RootLayout({
                   </div>
                 </div>
                 <div className="topbar-right">
+                  <NetworkSelector />
                   <ThemeToggle />
                   <WalletButton />
                 </div>

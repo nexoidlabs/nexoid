@@ -34,19 +34,19 @@ export enum DelegationStatus {
   Revoked = 2,
 }
 
-export interface DelegationRecord {
-  issuer: `0x${string}`;
-  subject: `0x${string}`;
-  credentialHash: `0x${string}`;
+// ─── Agent Record (mirrors Solidity struct in NexoidModule) ──
+
+export interface AgentRecord {
+  agentSafe: `0x${string}`;
+  agentEOA: `0x${string}`;
+  createdAt: bigint;
   scopeHash: `0x${string}`;
-  validFrom: bigint;
+  credentialHash: `0x${string}`;
   validUntil: bigint;
-  parentDelegationId: bigint;
-  delegationDepth: number;
   status: DelegationStatus;
 }
 
-// ─── Scope Types (V1 — 4 fields, D-22) ──────────────────
+// ─── Scope Types (V1 — 3 fields, flat model) ────────────
 
 export interface BudgetLimit {
   amount: string;
@@ -61,7 +61,7 @@ export interface MaxTransactionAmount {
 }
 
 /**
- * V1 Agent Scope — 4 fields.
+ * V1 Agent Scope — 3 fields (flat delegation model, no delegationDepth).
  * On-chain: scopeHash = keccak256(canonicalize(scope))
  * Off-chain: full scope object stored with VC
  */
@@ -69,7 +69,6 @@ export interface AgentScope {
   budgetLimit: BudgetLimit;
   maxTransactionAmount: MaxTransactionAmount;
   allowedTools: string[];
-  delegationDepth: number;
 }
 
 // ─── DID Types ───────────────────────────────────────────

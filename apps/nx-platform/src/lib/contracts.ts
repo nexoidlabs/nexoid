@@ -116,115 +116,6 @@ export const IDENTITY_REGISTRY_ABI = [
   },
 ] as const;
 
-// Full ABI for SafeIdentityModule — read + write functions
-export const SAFE_IDENTITY_MODULE_ABI = [
-  // --- Read functions ---
-  {
-    type: "function",
-    name: "getDelegation",
-    inputs: [{ name: "delegationId", type: "uint256" }],
-    outputs: [
-      {
-        name: "",
-        type: "tuple",
-        components: [
-          { name: "issuer", type: "address" },
-          { name: "subject", type: "address" },
-          { name: "credentialHash", type: "bytes32" },
-          { name: "scopeHash", type: "bytes32" },
-          { name: "validFrom", type: "uint64" },
-          { name: "validUntil", type: "uint64" },
-          { name: "parentDelegationId", type: "uint256" },
-          { name: "delegationDepth", type: "uint8" },
-          { name: "status", type: "uint8" },
-        ],
-      },
-    ],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "isValidDelegation",
-    inputs: [{ name: "delegationId", type: "uint256" }],
-    outputs: [
-      { name: "valid", type: "bool" },
-      { name: "depth", type: "uint8" },
-    ],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "nextDelegationId",
-    inputs: [],
-    outputs: [{ name: "", type: "uint256" }],
-    stateMutability: "view",
-  },
-  // --- Write functions ---
-  {
-    type: "function",
-    name: "delegateWithScope",
-    inputs: [
-      { name: "subject", type: "address" },
-      { name: "credentialHash", type: "bytes32" },
-      { name: "scopeHash", type: "bytes32" },
-      { name: "validUntil", type: "uint64" },
-      { name: "parentDelegationId", type: "uint256" },
-      { name: "delegationDepth", type: "uint8" },
-    ],
-    outputs: [{ name: "delegationId", type: "uint256" }],
-    stateMutability: "nonpayable",
-  },
-  {
-    type: "function",
-    name: "revokeDelegation",
-    inputs: [{ name: "delegationId", type: "uint256" }],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-  {
-    type: "function",
-    name: "suspendDelegation",
-    inputs: [{ name: "delegationId", type: "uint256" }],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-  {
-    type: "function",
-    name: "reactivateDelegation",
-    inputs: [{ name: "delegationId", type: "uint256" }],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-  // --- Events ---
-  {
-    type: "event",
-    name: "DelegationCreated",
-    inputs: [
-      { name: "delegationId", type: "uint256", indexed: true },
-      { name: "issuer", type: "address", indexed: true },
-      { name: "subject", type: "address", indexed: true },
-      { name: "scopeHash", type: "bytes32", indexed: false },
-      { name: "delegationDepth", type: "uint8", indexed: false },
-      { name: "validUntil", type: "uint64", indexed: false },
-    ],
-  },
-  {
-    type: "event",
-    name: "DelegationRevoked",
-    inputs: [
-      { name: "delegationId", type: "uint256", indexed: true },
-      { name: "revokedBy", type: "address", indexed: true },
-    ],
-  },
-  {
-    type: "event",
-    name: "DelegationSuspended",
-    inputs: [
-      { name: "delegationId", type: "uint256", indexed: true },
-      { name: "suspendedBy", type: "address", indexed: true },
-    ],
-  },
-] as const;
 
 // Minimal AllowanceModule ABI for reading delegate allowances
 export const ALLOWANCE_MODULE_ABI = [
@@ -285,8 +176,9 @@ export const ERC20_ABI = [
 
 export const ALLOWANCE_MODULE_ADDRESS = "0xCFbFaC74C26F8647cBDb8c5caf80BB5b32E43134" as Address;
 
-// NexoidModule ABI for querying agent Safes
+// NexoidModule ABI for agent management
 export const NEXOID_MODULE_ABI = [
+  // --- Read functions ---
   {
     type: "function",
     name: "getAgentSafes",
@@ -299,6 +191,10 @@ export const NEXOID_MODULE_ABI = [
           { name: "agentSafe", type: "address" },
           { name: "agentEOA", type: "address" },
           { name: "createdAt", type: "uint64" },
+          { name: "scopeHash", type: "bytes32" },
+          { name: "credentialHash", type: "bytes32" },
+          { name: "validUntil", type: "uint64" },
+          { name: "status", type: "uint8" },
         ],
       },
     ],
@@ -318,6 +214,110 @@ export const NEXOID_MODULE_ABI = [
     outputs: [{ name: "", type: "uint256" }],
     stateMutability: "view",
   },
+  {
+    type: "function",
+    name: "isValidAgent",
+    inputs: [{ name: "agentSafe", type: "address" }],
+    outputs: [{ name: "", type: "bool" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "getAgentRecord",
+    inputs: [{ name: "agentSafe", type: "address" }],
+    outputs: [
+      {
+        name: "",
+        type: "tuple",
+        components: [
+          { name: "agentSafe", type: "address" },
+          { name: "agentEOA", type: "address" },
+          { name: "createdAt", type: "uint64" },
+          { name: "scopeHash", type: "bytes32" },
+          { name: "credentialHash", type: "bytes32" },
+          { name: "validUntil", type: "uint64" },
+          { name: "status", type: "uint8" },
+        ],
+      },
+    ],
+    stateMutability: "view",
+  },
+  // --- Write functions ---
+  {
+    type: "function",
+    name: "registerAgentSafe",
+    inputs: [
+      { name: "agentSafe", type: "address" },
+      { name: "agentEOA", type: "address" },
+      { name: "scopeHash", type: "bytes32" },
+      { name: "credentialHash", type: "bytes32" },
+      { name: "validUntil", type: "uint64" },
+    ],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    name: "updateAgentScope",
+    inputs: [
+      { name: "agentSafe", type: "address" },
+      { name: "scopeHash", type: "bytes32" },
+      { name: "credentialHash", type: "bytes32" },
+      { name: "validUntil", type: "uint64" },
+    ],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    name: "suspendAgent",
+    inputs: [{ name: "agentSafe", type: "address" }],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    name: "revokeAgent",
+    inputs: [{ name: "agentSafe", type: "address" }],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    name: "reactivateAgent",
+    inputs: [{ name: "agentSafe", type: "address" }],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  // --- Events ---
+  {
+    type: "event",
+    name: "AgentRegistered",
+    inputs: [
+      { name: "operatorSafe", type: "address", indexed: true },
+      { name: "agentSafe", type: "address", indexed: true },
+      { name: "agentEOA", type: "address", indexed: false },
+    ],
+  },
+  {
+    type: "event",
+    name: "AgentScopeUpdated",
+    inputs: [
+      { name: "agentSafe", type: "address", indexed: true },
+      { name: "scopeHash", type: "bytes32", indexed: false },
+      { name: "credentialHash", type: "bytes32", indexed: false },
+      { name: "validUntil", type: "uint64", indexed: false },
+    ],
+  },
+  {
+    type: "event",
+    name: "AgentStatusChanged",
+    inputs: [
+      { name: "agentSafe", type: "address", indexed: true },
+      { name: "oldStatus", type: "uint8", indexed: false },
+      { name: "newStatus", type: "uint8", indexed: false },
+    ],
+  },
 ] as const;
 
 export const USDT_ADDRESSES: Record<string, Address> = {
@@ -333,7 +333,8 @@ export function getTokenAddress(): Address {
 
 export const ENTITY_TYPES = ["Human", "VirtualAgent", "PhysicalAgent", "Organization"] as const;
 export const ENTITY_STATUSES = ["Active", "Suspended", "Revoked"] as const;
-export const DELEGATION_STATUSES = ["Active", "Suspended", "Revoked"] as const;
+export const AGENT_STATUSES = ["Active", "Suspended", "Revoked"] as const;
+export const DELEGATION_STATUSES = AGENT_STATUSES; // backward compat alias
 
 export function getChain(): Chain {
   const networkName = process.env.NEXT_PUBLIC_NETWORK ?? "hardhat";

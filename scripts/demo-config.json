@@ -23,7 +23,6 @@
   ],
   "contracts": {
     "identityRegistry": "REPLACE_AFTER_DEPLOYMENT",
-    "delegationRegistry": "REPLACE_AFTER_DEPLOYMENT",
     "nexoidModule": "REPLACE_AFTER_DEPLOYMENT"
   },
   "token": {

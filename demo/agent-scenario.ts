@@ -50,7 +50,6 @@ async function main() {
   const client = new NexoidClient({
     rpcUrl: config.rpcUrl,
     registryAddress: config.contracts.identityRegistry,
-    delegationRegistryAddress: config.contracts.delegationRegistry,
     nexoidModuleAddress: config.contracts.nexoidModule,
     privateKey: agent.privateKey,
   });
@@ -69,12 +68,10 @@ async function main() {
   console.log("Owner:", identity.ownerDid ?? identity.owner);
   await pause();
 
-  // Step 2: Validate delegation
-  step(2, "Agent validates delegation");
-  // Delegation ID 1 (first delegation created)
-  const validation = await client.validateDelegation("1");
+  // Step 2: Validate agent
+  step(2, "Agent validates registration");
+  const validation = await client.isValidAgent(agentSafeAddress);
   console.log("Valid:", validation.valid);
-  console.log("Depth:", validation.depth);
   await pause();
 
   // Step 3: Check allowance (on agent's own Safe)
@@ -146,7 +143,7 @@ async function main() {
   // Step 9: Generate identity proof
   step(9, "Agent generates EIP-712 identity proof");
   const proof = await client.generateIdentityProof(
-    1n, // delegationId
+    0n, // delegationId (zero — scope set during agent registration)
     DEMO_RECIPIENT // verifier
   );
   console.log("Proof generated:");

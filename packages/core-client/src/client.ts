@@ -27,11 +27,12 @@ import {
   USDT_ETH_SEPOLIA,
   ALLOWANCE_MODULE,
   type IdentityOps,
-  type DelegationOps,
+  type AgentOps,
   type WalletOps,
   type NexoidDID,
   type Balance,
   type AgentScope,
+  type AgentRecord,
   type EmailCredential,
   type TokenAllowance,
 } from '@nexoid/nx-core';
@@ -40,8 +41,8 @@ import type {
   NexoidClientConfig,
   CreateAgentOpts,
   AgentIdentity,
-  DelegateOpts,
-  DelegationResult,
+  UpdateScopeOpts,
+  ScopeUpdateResult,
   ValidationResult,
   TransferOpts,
   TransactionResult,
@@ -55,10 +56,12 @@ import {
   hashApiKey,
 } from './identity.js';
 import {
-  delegate,
-  revoke,
-  validateDelegation,
-  listDelegations,
+  updateAgentScope,
+  revokeAgent,
+  suspendAgent,
+  reactivateAgent,
+  isValidAgent,
+  getAgentRecord,
 } from './delegation.js';
 import {
   getBalance,
@@ -96,7 +99,7 @@ import {
 
 export class NexoidClient {
   private identityOps: IdentityOps;
-  private delegationOps: DelegationOps;
+  private agentOps: AgentOps;
   private walletOps: WalletOps;
   private config: NexoidClientConfig;
   private operatorDid?: NexoidDID;
@@ -105,7 +108,7 @@ export class NexoidClient {
   private isMainnet: boolean;
   private tokenAddress: `0x${string}`;
   private allowanceModuleAddress: `0x${string}`;
-  private nexoidModuleAddress?: `0x${string}`;
+  private nexoidModuleAddress: `0x${string}`;
 
   constructor(config: NexoidClientConfig) {
     this.config = config;
@@ -142,8 +145,8 @@ export class NexoidClient {
       walletClient: this.walletClient,
     };
 
-    this.delegationOps = {
-      moduleAddress: config.delegationRegistryAddress,
+    this.agentOps = {
+      moduleAddress: config.nexoidModuleAddress,
       publicClient: this.publicClient,
       walletClient: this.walletClient,
     };
@@ -203,7 +206,6 @@ export class NexoidClient {
     agentEOA: `0x${string}`,
     operatorSafeAddress: `0x${string}`
   ): Promise<AgentSafeDeployResult> {
-    if (!this.nexoidModuleAddress) throw new Error('NexoidModule address not configured');
     return deployAgentSafe(
       this.getSafeConfig(),
       operatorSafeAddress,
@@ -217,8 +219,7 @@ export class NexoidClient {
    */
   async getAgentSafes(
     operatorSafeAddress: `0x${string}`
-  ): Promise<Array<{ agentSafe: `0x${string}`; agentEOA: `0x${string}`; createdAt: bigint }>> {
-    if (!this.nexoidModuleAddress) throw new Error('NexoidModule address not configured');
+  ): Promise<Array<{ agentSafe: `0x${string}`; agentEOA: `0x${string}`; createdAt: bigint; scopeHash: `0x${string}`; credentialHash: `0x${string}`; validUntil: bigint; status: number }>> {
     return getAgentSafes(this.publicClient, this.nexoidModuleAddress, operatorSafeAddress);
   }
 
@@ -239,7 +240,7 @@ export class NexoidClient {
   }
 
   /** Get the NexoidModule address being used */
-  getNexoidModuleAddress(): `0x${string}` | undefined {
+  getNexoidModuleAddress(): `0x${string}` {
     return this.nexoidModuleAddress;
   }
 
@@ -310,28 +311,36 @@ export class NexoidClient {
     return getAdmin(this.identityOps);
   }
 
-  // ─── Delegation ─────────────────────────────────────────────
+  // ─── Agent Scope (via NexoidModule) ────────────────────────
 
-  /** Create a scoped delegation to an agent */
-  async delegate(opts: DelegateOpts): Promise<DelegationResult> {
-    if (!this.operatorDid) throw new Error('Operator DID not set');
-    return delegate(this.delegationOps, this.operatorDid, opts);
+  /** Update scope, credential, and expiry for an agent */
+  async updateAgentScope(opts: UpdateScopeOpts): Promise<ScopeUpdateResult> {
+    return updateAgentScope(this.agentOps, opts);
   }
 
-  /** Revoke a delegation (O(1) chain-breaking) */
-  async revoke(delegationId: string): Promise<`0x${string}`> {
-    if (!this.operatorDid) throw new Error('Operator DID not set');
-    return revoke(this.delegationOps, this.operatorDid, delegationId);
+  /** Revoke an agent permanently */
+  async revokeAgent(agentSafe: `0x${string}`): Promise<`0x${string}`> {
+    return revokeAgent(this.agentOps, agentSafe);
   }
 
-  /** Validate a delegation chain */
-  async validateDelegation(delegationId: string): Promise<ValidationResult> {
-    return validateDelegation(this.delegationOps, delegationId);
+  /** Suspend an active agent (reversible) */
+  async suspendAgent(agentSafe: `0x${string}`): Promise<`0x${string}`> {
+    return suspendAgent(this.agentOps, agentSafe);
   }
 
-  /** List delegations for a DID */
-  async listDelegations(did: NexoidDID) {
-    return listDelegations(this.delegationOps, did);
+  /** Reactivate a suspended agent */
+  async reactivateAgent(agentSafe: `0x${string}`): Promise<`0x${string}`> {
+    return reactivateAgent(this.agentOps, agentSafe);
+  }
+
+  /** Check if an agent is valid (Active + not expired) */
+  async isValidAgent(agentSafe: `0x${string}`): Promise<ValidationResult> {
+    return isValidAgent(this.agentOps, agentSafe);
+  }
+
+  /** Get the full agent record */
+  async getAgentRecord(agentSafe: `0x${string}`): Promise<AgentRecord> {
+    return getAgentRecord(this.agentOps, agentSafe);
   }
 
   // ─── Financial (Safe-aware) ─────────────────────────────────

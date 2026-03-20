@@ -9,10 +9,10 @@ import { time, loadFixture } from "@nomicfoundation/hardhat-toolbox/network-help
  *   1. Admin bootstraps the system (deploy contracts, authorize registrar)
  *   2. Registrar registers a human identity (operator)
  *   3. Operator creates agent identities
- *   4. Operator delegates scoped authority to agents
+ *   4. Operator registers agent Safes with scope via NexoidModule
  *   5. Operator sets spending allowances for agents
  *   6. Agents send USDC within allowance limits
- *   7. Delegation validation & chain-breaking revocation
+ *   7. Agent validation & revocation via NexoidModule
  *   8. Multi-agent fleet management
  *   9. Agent lifecycle (suspend, reactivate, revoke)
  *  10. Edge cases and security boundaries
@@ -32,7 +32,7 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
   /**
    * Deploy all contracts and set up initial state:
    * - IdentityRegistry
-   * - DelegationRegistry (linked to IdentityRegistry)
+   * - NexoidModule (agent scope/status management)
    * - TestAllowanceModule
    * - MockERC20 (USDC)
    * - Registrar authorized
@@ -47,7 +47,7 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
       agent1,       // Virtual agent #1
       agent2,       // Virtual agent #2
       agent3,       // Physical agent
-      subAgent,     // Sub-agent (delegated by agent1)
+      subAgent,     // Extra signer (used as additional agent EOA)
       recipient,    // Payment recipient
       stranger,     // Unauthorized signer
     ] = await hre.ethers.getSigners();
@@ -56,9 +56,9 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
     const IdentityRegistry = await hre.ethers.getContractFactory("IdentityRegistry");
     const registry = await IdentityRegistry.connect(admin).deploy();
 
-    // Deploy DelegationRegistry linked to IdentityRegistry
-    const DelegationRegistry = await hre.ethers.getContractFactory("DelegationRegistry");
-    const delegationRegistry = await DelegationRegistry.connect(admin).deploy(await registry.getAddress());
+    // Deploy NexoidModule (flat agent scope/status management)
+    const NexoidModule = await hre.ethers.getContractFactory("NexoidModule");
+    const nexoidModule = await NexoidModule.connect(admin).deploy();
 
     // Deploy TestAllowanceModule
     const AllowanceModule = await hre.ethers.getContractFactory("TestAllowanceModule");
@@ -90,7 +90,7 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
 
     return {
       registry,
-      delegationRegistry,
+      nexoidModule,
       allowanceModule,
       usdc,
       admin,
@@ -118,11 +118,11 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
 
   describe("Phase 1: System Bootstrap", function () {
     it("should deploy all contracts successfully", async function () {
-      const { registry, delegationRegistry, allowanceModule, usdc } =
+      const { registry, nexoidModule, allowanceModule, usdc } =
         await loadFixture(deployFullSystemFixture);
 
       expect(await registry.getAddress()).to.be.properAddress;
-      expect(await delegationRegistry.getAddress()).to.be.properAddress;
+      expect(await nexoidModule.getAddress()).to.be.properAddress;
       expect(await allowanceModule.getAddress()).to.be.properAddress;
       expect(await usdc.getAddress()).to.be.properAddress;
     });
@@ -131,14 +131,6 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
       const { registry, admin } = await loadFixture(deployFullSystemFixture);
 
       expect(await registry.admin()).to.equal(admin.address);
-    });
-
-    it("should link DelegationRegistry to IdentityRegistry", async function () {
-      const { registry, delegationRegistry } = await loadFixture(deployFullSystemFixture);
-
-      expect(await delegationRegistry.identityRegistry()).to.equal(
-        await registry.getAddress()
-      );
     });
 
     it("should authorize registrar", async function () {
@@ -360,10 +352,10 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
   });
 
   // ═══════════════════════════════════════════════════════════════
-  // PHASE 4: Delegation (Operator → Agent, Agent → Sub-Agent)
+  // PHASE 4: Agent Registration via NexoidModule (Scope & Status)
   // ═══════════════════════════════════════════════════════════════
 
-  describe("Phase 4: Delegation", function () {
+  describe("Phase 4: Agent Registration via NexoidModule", function () {
     async function operatorWithAgentsFixture() {
       const fixture = await loadFixture(deployFullSystemFixture);
       const { registry, registrar, operator, agent1, agent2, subAgent, operatorMeta, agentMeta } = fixture;
@@ -373,7 +365,7 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
         operator.address, EntityType.Human, operatorMeta
       );
 
-      // Create agents
+      // Create agents in IdentityRegistry
       await registry.connect(operator).createAgentIdentity(
         agent1.address, EntityType.VirtualAgent, agentMeta
       );
@@ -387,181 +379,193 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
       return fixture;
     }
 
-    it("should create root delegation (operator → agent)", async function () {
-      const { delegationRegistry, operator, agent1, credentialHash, scopeHash, futureTimestamp } =
+    it("should register agent Safe with scope via NexoidModule", async function () {
+      const { nexoidModule, operator, agent1, credentialHash, scopeHash, futureTimestamp } =
         await loadFixture(operatorWithAgentsFixture);
 
       await expect(
-        delegationRegistry.connect(operator).delegateWithScope(
-          agent1.address, credentialHash, scopeHash, futureTimestamp, 0, 2
+        nexoidModule.connect(operator).registerAgentSafe(
+          agent1.address, agent1.address, scopeHash, credentialHash, futureTimestamp
         )
       )
-        .to.emit(delegationRegistry, "DelegationCreated")
-        .withArgs(1, operator.address, agent1.address, scopeHash, 2, futureTimestamp);
+        .to.emit(nexoidModule, "AgentSafeRegistered")
+        .withArgs(operator.address, agent1.address, agent1.address);
 
-      const record = await delegationRegistry.getDelegation(1);
-      expect(record.issuer).to.equal(operator.address);
-      expect(record.subject).to.equal(agent1.address);
-      expect(record.credentialHash).to.equal(credentialHash);
+      expect(await nexoidModule.getOperator(agent1.address)).to.equal(operator.address);
+      expect(await nexoidModule.agentCount(operator.address)).to.equal(1);
+
+      const record = await nexoidModule.getAgentRecord(agent1.address);
+      expect(record.agentSafe).to.equal(agent1.address);
+      expect(record.agentEOA).to.equal(agent1.address);
       expect(record.scopeHash).to.equal(scopeHash);
-      expect(record.parentDelegationId).to.equal(0); // root
-      expect(record.delegationDepth).to.equal(2);
+      expect(record.credentialHash).to.equal(credentialHash);
+      expect(record.validUntil).to.equal(futureTimestamp);
       expect(record.status).to.equal(DelegationStatus.Active);
     });
 
-    it("should create multiple delegations for different agents", async function () {
-      const { delegationRegistry, operator, agent1, agent2, credentialHash, scopeHash, futureTimestamp } =
+    it("should emit AgentScopeUpdated when scope is provided at registration", async function () {
+      const { nexoidModule, operator, agent1, credentialHash, scopeHash, futureTimestamp } =
         await loadFixture(operatorWithAgentsFixture);
 
-      await delegationRegistry.connect(operator).delegateWithScope(
-        agent1.address, credentialHash, scopeHash, futureTimestamp, 0, 1
-      );
-      await delegationRegistry.connect(operator).delegateWithScope(
-        agent2.address, credentialHash, scopeHash, futureTimestamp, 0, 0
-      );
-
-      expect(await delegationRegistry.nextDelegationId()).to.equal(3);
-
-      const rec1 = await delegationRegistry.getDelegation(1);
-      const rec2 = await delegationRegistry.getDelegation(2);
-      expect(rec1.subject).to.equal(agent1.address);
-      expect(rec2.subject).to.equal(agent2.address);
+      await expect(
+        nexoidModule.connect(operator).registerAgentSafe(
+          agent1.address, agent1.address, scopeHash, credentialHash, futureTimestamp
+        )
+      )
+        .to.emit(nexoidModule, "AgentScopeUpdated")
+        .withArgs(operator.address, agent1.address, scopeHash, credentialHash, futureTimestamp);
     });
 
-    it("should create sub-delegation (agent → sub-agent) within depth", async function () {
-      const { delegationRegistry, operator, agent1, subAgent, credentialHash, scopeHash, futureTimestamp } =
+    it("should register multiple agent Safes for same operator", async function () {
+      const { nexoidModule, operator, agent1, agent2, credentialHash, scopeHash, futureTimestamp } =
         await loadFixture(operatorWithAgentsFixture);
 
-      // Root: operator → agent1, depth=2
-      await delegationRegistry.connect(operator).delegateWithScope(
-        agent1.address, credentialHash, scopeHash, futureTimestamp, 0, 2
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent1.address, agent1.address, scopeHash, credentialHash, futureTimestamp
+      );
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent2.address, agent2.address, scopeHash, credentialHash, futureTimestamp
       );
 
-      // Sub: agent1 → subAgent, depth=1 (< parent depth 2)
-      await expect(
-        delegationRegistry.connect(agent1).delegateWithScope(
-          subAgent.address, credentialHash, scopeHash, futureTimestamp, 1, 1
-        )
-      ).to.emit(delegationRegistry, "DelegationCreated");
+      expect(await nexoidModule.agentCount(operator.address)).to.equal(2);
 
-      const subRec = await delegationRegistry.getDelegation(2);
-      expect(subRec.issuer).to.equal(agent1.address);
-      expect(subRec.subject).to.equal(subAgent.address);
-      expect(subRec.parentDelegationId).to.equal(1);
-      expect(subRec.delegationDepth).to.equal(1);
+      const agents = await nexoidModule.getAgentSafes(operator.address);
+      expect(agents.length).to.equal(2);
+      expect(agents[0].agentSafe).to.equal(agent1.address);
+      expect(agents[1].agentSafe).to.equal(agent2.address);
     });
 
-    it("should reject sub-delegation when parent depth=0", async function () {
-      const { delegationRegistry, operator, agent1, subAgent, credentialHash, scopeHash, futureTimestamp } =
+    it("should validate agent via isValidAgent", async function () {
+      const { nexoidModule, operator, agent1, credentialHash, scopeHash, futureTimestamp } =
         await loadFixture(operatorWithAgentsFixture);
 
-      // Root delegation with depth=0 (no sub-delegation allowed)
-      await delegationRegistry.connect(operator).delegateWithScope(
-        agent1.address, credentialHash, scopeHash, futureTimestamp, 0, 0
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent1.address, agent1.address, scopeHash, credentialHash, futureTimestamp
+      );
+
+      expect(await nexoidModule.isValidAgent(agent1.address)).to.be.true;
+    });
+
+    it("should return false for isValidAgent on unregistered address", async function () {
+      const { nexoidModule, stranger } =
+        await loadFixture(operatorWithAgentsFixture);
+
+      expect(await nexoidModule.isValidAgent(stranger.address)).to.be.false;
+    });
+
+    it("should retrieve full agent record via getAgentRecord", async function () {
+      const { nexoidModule, operator, agent1, credentialHash, scopeHash, futureTimestamp } =
+        await loadFixture(operatorWithAgentsFixture);
+
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent1.address, agent1.address, scopeHash, credentialHash, futureTimestamp
+      );
+
+      const record = await nexoidModule.getAgentRecord(agent1.address);
+      expect(record.agentSafe).to.equal(agent1.address);
+      expect(record.agentEOA).to.equal(agent1.address);
+      expect(record.scopeHash).to.equal(scopeHash);
+      expect(record.credentialHash).to.equal(credentialHash);
+      expect(record.validUntil).to.equal(futureTimestamp);
+      expect(record.status).to.equal(DelegationStatus.Active);
+      expect(record.createdAt).to.be.greaterThan(0);
+    });
+
+    it("should revert getAgentRecord for unregistered agent", async function () {
+      const { nexoidModule, stranger } =
+        await loadFixture(operatorWithAgentsFixture);
+
+      await expect(
+        nexoidModule.getAgentRecord(stranger.address)
+      ).to.be.revertedWith("Agent not registered");
+    });
+
+    it("should update agent scope via updateAgentScope", async function () {
+      const { nexoidModule, operator, agent1, credentialHash, scopeHash, futureTimestamp } =
+        await loadFixture(operatorWithAgentsFixture);
+
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent1.address, agent1.address, scopeHash, credentialHash, futureTimestamp
+      );
+
+      const newScopeHash = hre.ethers.keccak256(hre.ethers.toUtf8Bytes("scope-payments-v2"));
+      const newCredentialHash = hre.ethers.keccak256(hre.ethers.toUtf8Bytes("credential-vc-v2"));
+      const newValidUntil = futureTimestamp + 86400n;
+
+      await expect(
+        nexoidModule.connect(operator).updateAgentScope(
+          agent1.address, newScopeHash, newCredentialHash, newValidUntil
+        )
+      )
+        .to.emit(nexoidModule, "AgentScopeUpdated")
+        .withArgs(operator.address, agent1.address, newScopeHash, newCredentialHash, newValidUntil);
+
+      const record = await nexoidModule.getAgentRecord(agent1.address);
+      expect(record.scopeHash).to.equal(newScopeHash);
+      expect(record.credentialHash).to.equal(newCredentialHash);
+      expect(record.validUntil).to.equal(newValidUntil);
+    });
+
+    it("should reject duplicate agent Safe registration", async function () {
+      const { nexoidModule, operator, agent1, credentialHash, scopeHash, futureTimestamp } =
+        await loadFixture(operatorWithAgentsFixture);
+
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent1.address, agent1.address, scopeHash, credentialHash, futureTimestamp
       );
 
       await expect(
-        delegationRegistry.connect(agent1).delegateWithScope(
-          subAgent.address, credentialHash, scopeHash, futureTimestamp, 1, 0
+        nexoidModule.connect(operator).registerAgentSafe(
+          agent1.address, agent1.address, scopeHash, credentialHash, futureTimestamp
         )
-      ).to.be.revertedWith("Parent does not allow sub-delegation");
+      ).to.be.revertedWith("Agent Safe already registered");
     });
 
-    it("should reject sub-delegation with depth >= parent depth", async function () {
-      const { delegationRegistry, operator, agent1, subAgent, credentialHash, scopeHash, futureTimestamp } =
+    it("should reject registration with zero agent Safe address", async function () {
+      const { nexoidModule, operator, agent1, credentialHash, scopeHash, futureTimestamp } =
         await loadFixture(operatorWithAgentsFixture);
 
-      await delegationRegistry.connect(operator).delegateWithScope(
-        agent1.address, credentialHash, scopeHash, futureTimestamp, 0, 2
+      await expect(
+        nexoidModule.connect(operator).registerAgentSafe(
+          hre.ethers.ZeroAddress, agent1.address, scopeHash, credentialHash, futureTimestamp
+        )
+      ).to.be.revertedWith("Invalid agent Safe");
+    });
+
+    it("should reject registration with zero agent EOA address", async function () {
+      const { nexoidModule, operator, agent1, credentialHash, scopeHash, futureTimestamp } =
+        await loadFixture(operatorWithAgentsFixture);
+
+      await expect(
+        nexoidModule.connect(operator).registerAgentSafe(
+          agent1.address, hre.ethers.ZeroAddress, scopeHash, credentialHash, futureTimestamp
+        )
+      ).to.be.revertedWith("Invalid agent EOA");
+    });
+
+    it("should register agent Safe with no expiry (validUntil = 0)", async function () {
+      const { nexoidModule, operator, agent1, credentialHash, scopeHash } =
+        await loadFixture(operatorWithAgentsFixture);
+
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent1.address, agent1.address, scopeHash, credentialHash, 0
       );
 
-      await expect(
-        delegationRegistry.connect(agent1).delegateWithScope(
-          subAgent.address, credentialHash, scopeHash, futureTimestamp, 1, 2
-        )
-      ).to.be.revertedWith("Sub-delegation depth must be less than parent");
-    });
+      expect(await nexoidModule.isValidAgent(agent1.address)).to.be.true;
 
-    it("should reject sub-delegation exceeding parent validity", async function () {
-      const { delegationRegistry, operator, agent1, subAgent, credentialHash, scopeHash, futureTimestamp } =
-        await loadFixture(operatorWithAgentsFixture);
-
-      await delegationRegistry.connect(operator).delegateWithScope(
-        agent1.address, credentialHash, scopeHash, futureTimestamp, 0, 2
-      );
-
-      const beyondParent = futureTimestamp + 1n;
-      await expect(
-        delegationRegistry.connect(agent1).delegateWithScope(
-          subAgent.address, credentialHash, scopeHash, beyondParent, 1, 0
-        )
-      ).to.be.revertedWith("Cannot exceed parent validity");
-    });
-
-    it("should reject delegation from non-owner of subject", async function () {
-      const { registry, delegationRegistry, registrar, operator, operator2, agent1, operatorMeta, credentialHash, scopeHash, futureTimestamp } =
-        await loadFixture(operatorWithAgentsFixture);
-
-      // Register operator2 separately
-      await registry.connect(registrar).registerIdentityFor(
-        operator2.address, EntityType.Human, operatorMeta
-      );
-
-      // operator2 tries to delegate to agent1 (owned by operator) — should fail
-      await expect(
-        delegationRegistry.connect(operator2).delegateWithScope(
-          agent1.address, credentialHash, scopeHash, futureTimestamp, 0, 0
-        )
-      ).to.be.revertedWith("Only owner can create root delegation");
-    });
-
-    it("should reject delegation with past validUntil", async function () {
-      const { delegationRegistry, operator, agent1, credentialHash, scopeHash } =
-        await loadFixture(operatorWithAgentsFixture);
-
-      const pastTimestamp = BigInt((await time.latest()) - 100);
-      await expect(
-        delegationRegistry.connect(operator).delegateWithScope(
-          agent1.address, credentialHash, scopeHash, pastTimestamp, 0, 0
-        )
-      ).to.be.revertedWith("validUntil must be in the future");
-    });
-
-    it("should reject delegation from suspended issuer", async function () {
-      const { registry, delegationRegistry, operator, agent1, credentialHash, scopeHash, futureTimestamp } =
-        await loadFixture(operatorWithAgentsFixture);
-
-      await registry.connect(operator).updateStatus(operator.address, EntityStatus.Suspended);
-
-      await expect(
-        delegationRegistry.connect(operator).delegateWithScope(
-          agent1.address, credentialHash, scopeHash, futureTimestamp, 0, 0
-        )
-      ).to.be.revertedWith("Issuer not active");
-    });
-
-    it("should reject delegation to suspended subject", async function () {
-      const { registry, delegationRegistry, operator, agent1, credentialHash, scopeHash, futureTimestamp } =
-        await loadFixture(operatorWithAgentsFixture);
-
-      await registry.connect(operator).updateStatus(agent1.address, EntityStatus.Suspended);
-
-      await expect(
-        delegationRegistry.connect(operator).delegateWithScope(
-          agent1.address, credentialHash, scopeHash, futureTimestamp, 0, 0
-        )
-      ).to.be.revertedWith("Subject not active");
+      const record = await nexoidModule.getAgentRecord(agent1.address);
+      expect(record.validUntil).to.equal(0);
     });
   });
 
   // ═══════════════════════════════════════════════════════════════
-  // PHASE 5: Allowance Setup (Operator → Agent Spending Limits)
+  // PHASE 5: Allowance Setup (Operator -> Agent Spending Limits)
   // ═══════════════════════════════════════════════════════════════
 
   describe("Phase 5: Allowance Setup", function () {
-    async function delegatedAgentsFixture() {
+    async function registeredAgentsFixture() {
       const fixture = await loadFixture(deployFullSystemFixture);
-      const { registry, delegationRegistry, allowanceModule, registrar, operator, agent1, agent2, operatorMeta, agentMeta, credentialHash, scopeHash, futureTimestamp } = fixture;
+      const { registry, nexoidModule, registrar, operator, agent1, agent2, operatorMeta, agentMeta, credentialHash, scopeHash, futureTimestamp } = fixture;
 
       await registry.connect(registrar).registerIdentityFor(
         operator.address, EntityType.Human, operatorMeta
@@ -573,12 +577,12 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
         agent2.address, EntityType.VirtualAgent, agentMeta
       );
 
-      // Delegate to both agents
-      await delegationRegistry.connect(operator).delegateWithScope(
-        agent1.address, credentialHash, scopeHash, futureTimestamp, 0, 1
+      // Register agent Safes with scope via NexoidModule
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent1.address, agent1.address, scopeHash, credentialHash, futureTimestamp
       );
-      await delegationRegistry.connect(operator).delegateWithScope(
-        agent2.address, credentialHash, scopeHash, futureTimestamp, 0, 0
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent2.address, agent2.address, scopeHash, credentialHash, futureTimestamp
       );
 
       return fixture;
@@ -586,7 +590,7 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
 
     it("should add agent as delegate on AllowanceModule", async function () {
       const { allowanceModule, operator, agent1 } =
-        await loadFixture(delegatedAgentsFixture);
+        await loadFixture(registeredAgentsFixture);
 
       await expect(
         allowanceModule.connect(operator).addDelegate(agent1.address)
@@ -600,7 +604,7 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
 
     it("should set USDC allowance for agent", async function () {
       const { allowanceModule, usdc, operator, agent1 } =
-        await loadFixture(delegatedAgentsFixture);
+        await loadFixture(registeredAgentsFixture);
 
       await allowanceModule.connect(operator).addDelegate(agent1.address);
 
@@ -623,7 +627,7 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
 
     it("should set different allowances for different agents", async function () {
       const { allowanceModule, usdc, operator, agent1, agent2 } =
-        await loadFixture(delegatedAgentsFixture);
+        await loadFixture(registeredAgentsFixture);
 
       await allowanceModule.connect(operator).addDelegate(agent1.address);
       await allowanceModule.connect(operator).addDelegate(agent2.address);
@@ -649,7 +653,7 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
 
     it("should update an existing allowance", async function () {
       const { allowanceModule, usdc, operator, agent1 } =
-        await loadFixture(delegatedAgentsFixture);
+        await loadFixture(registeredAgentsFixture);
 
       await allowanceModule.connect(operator).addDelegate(agent1.address);
       await allowanceModule.connect(operator).setAllowance(
@@ -669,7 +673,7 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
 
     it("should reject allowance for non-delegate", async function () {
       const { allowanceModule, usdc, operator, stranger } =
-        await loadFixture(delegatedAgentsFixture);
+        await loadFixture(registeredAgentsFixture);
 
       await expect(
         allowanceModule.connect(operator).setAllowance(
@@ -686,7 +690,7 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
   describe("Phase 6: Agent USDC Transfers", function () {
     async function fundedAgentFixture() {
       const fixture = await loadFixture(deployFullSystemFixture);
-      const { registry, delegationRegistry, allowanceModule, usdc, registrar, operator, agent1, agent2, operatorMeta, agentMeta, credentialHash, scopeHash, futureTimestamp } = fixture;
+      const { registry, nexoidModule, allowanceModule, usdc, registrar, operator, agent1, agent2, operatorMeta, agentMeta, credentialHash, scopeHash, futureTimestamp } = fixture;
 
       // Register operator, create agents
       await registry.connect(registrar).registerIdentityFor(
@@ -699,12 +703,12 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
         agent2.address, EntityType.VirtualAgent, agentMeta
       );
 
-      // Delegate
-      await delegationRegistry.connect(operator).delegateWithScope(
-        agent1.address, credentialHash, scopeHash, futureTimestamp, 0, 1
+      // Register agent Safes via NexoidModule
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent1.address, agent1.address, scopeHash, credentialHash, futureTimestamp
       );
-      await delegationRegistry.connect(operator).delegateWithScope(
-        agent2.address, credentialHash, scopeHash, futureTimestamp, 0, 0
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent2.address, agent2.address, scopeHash, credentialHash, futureTimestamp
       );
 
       // Set allowances: agent1=100 USDC, agent2=200 USDC
@@ -847,13 +851,13 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
   });
 
   // ═══════════════════════════════════════════════════════════════
-  // PHASE 7: Delegation Validation & Chain-Breaking Revocation
+  // PHASE 7: Agent Validation & Revocation via NexoidModule
   // ═══════════════════════════════════════════════════════════════
 
-  describe("Phase 7: Delegation Validation & Revocation", function () {
-    async function fullChainFixture() {
+  describe("Phase 7: Agent Validation & Revocation", function () {
+    async function registeredAgentFixture() {
       const fixture = await loadFixture(deployFullSystemFixture);
-      const { registry, delegationRegistry, registrar, operator, agent1, subAgent, operatorMeta, agentMeta, credentialHash, scopeHash, futureTimestamp } = fixture;
+      const { registry, nexoidModule, registrar, operator, agent1, operatorMeta, agentMeta, credentialHash, scopeHash, futureTimestamp } = fixture;
 
       await registry.connect(registrar).registerIdentityFor(
         operator.address, EntityType.Human, operatorMeta
@@ -861,130 +865,117 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
       await registry.connect(operator).createAgentIdentity(
         agent1.address, EntityType.VirtualAgent, agentMeta
       );
-      await registry.connect(operator).createAgentIdentity(
-        subAgent.address, EntityType.VirtualAgent, agentMeta
+
+      // Register agent Safe with scope via NexoidModule
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent1.address, agent1.address, scopeHash, credentialHash, futureTimestamp
       );
 
-      // Root: operator → agent1, depth=2
-      await delegationRegistry.connect(operator).delegateWithScope(
-        agent1.address, credentialHash, scopeHash, futureTimestamp, 0, 2
-      );
-
-      // Sub: agent1 → subAgent, depth=0
-      await delegationRegistry.connect(agent1).delegateWithScope(
-        subAgent.address, credentialHash, scopeHash, futureTimestamp, 1, 0
-      );
-
-      return { ...fixture, rootDelegationId: 1n, subDelegationId: 2n };
+      return fixture;
     }
 
-    it("should validate root delegation", async function () {
-      const { delegationRegistry, rootDelegationId } =
-        await loadFixture(fullChainFixture);
+    it("should validate active agent", async function () {
+      const { nexoidModule, agent1 } =
+        await loadFixture(registeredAgentFixture);
 
-      const [valid, depth] = await delegationRegistry.isValidDelegation(rootDelegationId);
-      expect(valid).to.be.true;
-      expect(depth).to.equal(0); // root = depth 0
+      expect(await nexoidModule.isValidAgent(agent1.address)).to.be.true;
     });
 
-    it("should validate sub-delegation and report correct depth", async function () {
-      const { delegationRegistry, subDelegationId } =
-        await loadFixture(fullChainFixture);
+    it("should invalidate agent after suspension", async function () {
+      const { nexoidModule, operator, agent1 } =
+        await loadFixture(registeredAgentFixture);
 
-      const [valid, depth] = await delegationRegistry.isValidDelegation(subDelegationId);
-      expect(valid).to.be.true;
-      expect(depth).to.equal(1); // one level deep
+      await nexoidModule.connect(operator).suspendAgent(agent1.address);
+
+      expect(await nexoidModule.isValidAgent(agent1.address)).to.be.false;
     });
 
-    it("should invalidate entire chain when root is revoked (chain-breaking)", async function () {
-      const { delegationRegistry, operator, rootDelegationId, subDelegationId } =
-        await loadFixture(fullChainFixture);
+    it("should restore validity after reactivation", async function () {
+      const { nexoidModule, operator, agent1 } =
+        await loadFixture(registeredAgentFixture);
 
-      // Both valid before revocation
-      let [validRoot] = await delegationRegistry.isValidDelegation(rootDelegationId);
-      let [validSub] = await delegationRegistry.isValidDelegation(subDelegationId);
-      expect(validRoot).to.be.true;
-      expect(validSub).to.be.true;
+      await nexoidModule.connect(operator).suspendAgent(agent1.address);
+      expect(await nexoidModule.isValidAgent(agent1.address)).to.be.false;
 
-      // Revoke root (O(1) — single on-chain write)
-      await delegationRegistry.connect(operator).revokeDelegation(rootDelegationId);
-
-      // Root is now invalid
-      [validRoot] = await delegationRegistry.isValidDelegation(rootDelegationId);
-      expect(validRoot).to.be.false;
-
-      // Sub-delegation is also invalid (chain is broken)
-      [validSub] = await delegationRegistry.isValidDelegation(subDelegationId);
-      expect(validSub).to.be.false;
+      await nexoidModule.connect(operator).reactivateAgent(agent1.address);
+      expect(await nexoidModule.isValidAgent(agent1.address)).to.be.true;
     });
 
-    it("should invalidate delegation when issuer identity is suspended", async function () {
-      const { registry, delegationRegistry, operator, rootDelegationId, subDelegationId } =
-        await loadFixture(fullChainFixture);
-
-      // Suspend operator identity
-      await registry.connect(operator).updateStatus(operator.address, EntityStatus.Suspended);
-
-      // Root delegation invalid (issuer not active)
-      let [validRoot] = await delegationRegistry.isValidDelegation(rootDelegationId);
-      expect(validRoot).to.be.false;
-
-      // Sub also invalid (chain broken at root)
-      let [validSub] = await delegationRegistry.isValidDelegation(subDelegationId);
-      expect(validSub).to.be.false;
-
-      // Reactivate operator
-      await registry.connect(operator).updateStatus(operator.address, EntityStatus.Active);
-
-      // Delegation is valid again
-      [validRoot] = await delegationRegistry.isValidDelegation(rootDelegationId);
-      expect(validRoot).to.be.true;
-      [validSub] = await delegationRegistry.isValidDelegation(subDelegationId);
-      expect(validSub).to.be.true;
-    });
-
-    it("should invalidate delegation when subject identity is suspended", async function () {
-      const { registry, delegationRegistry, operator, agent1, rootDelegationId, subDelegationId } =
-        await loadFixture(fullChainFixture);
-
-      // Suspend agent1 (subject of root, issuer of sub)
-      await registry.connect(operator).updateStatus(agent1.address, EntityStatus.Suspended);
-
-      // Root invalid (subject not active)
-      let [validRoot] = await delegationRegistry.isValidDelegation(rootDelegationId);
-      expect(validRoot).to.be.false;
-
-      // Sub also invalid (issuer agent1 not active)
-      let [validSub] = await delegationRegistry.isValidDelegation(subDelegationId);
-      expect(validSub).to.be.false;
-    });
-
-    it("should suspend and reactivate a delegation", async function () {
-      const { delegationRegistry, operator, rootDelegationId } =
-        await loadFixture(fullChainFixture);
-
-      // Suspend
-      await delegationRegistry.connect(operator).suspendDelegation(rootDelegationId);
-      let [valid] = await delegationRegistry.isValidDelegation(rootDelegationId);
-      expect(valid).to.be.false;
-
-      // Reactivate
-      await delegationRegistry.connect(operator).reactivateDelegation(rootDelegationId);
-      [valid] = await delegationRegistry.isValidDelegation(rootDelegationId);
-      expect(valid).to.be.true;
-    });
-
-    it("should reject revocation by non-issuer", async function () {
-      const { delegationRegistry, agent1, rootDelegationId } =
-        await loadFixture(fullChainFixture);
+    it("should permanently invalidate agent after revocation", async function () {
+      const { nexoidModule, operator, agent1 } =
+        await loadFixture(registeredAgentFixture);
 
       await expect(
-        delegationRegistry.connect(agent1).revokeDelegation(rootDelegationId)
-      ).to.be.revertedWith("Not the issuer");
+        nexoidModule.connect(operator).revokeAgent(agent1.address)
+      )
+        .to.emit(nexoidModule, "AgentStatusChanged")
+        .withArgs(operator.address, agent1.address, DelegationStatus.Revoked);
+
+      expect(await nexoidModule.isValidAgent(agent1.address)).to.be.false;
+
+      // Cannot reactivate a revoked agent
+      await expect(
+        nexoidModule.connect(operator).reactivateAgent(agent1.address)
+      ).to.be.revertedWith("Can only reactivate suspended agent");
     });
 
-    it("should handle expired delegations", async function () {
-      const { registry, delegationRegistry, registrar, operator, agent1, operatorMeta, agentMeta, credentialHash, scopeHash } =
+    it("should emit AgentStatusChanged on suspend", async function () {
+      const { nexoidModule, operator, agent1 } =
+        await loadFixture(registeredAgentFixture);
+
+      await expect(
+        nexoidModule.connect(operator).suspendAgent(agent1.address)
+      )
+        .to.emit(nexoidModule, "AgentStatusChanged")
+        .withArgs(operator.address, agent1.address, DelegationStatus.Suspended);
+    });
+
+    it("should emit AgentStatusChanged on reactivate", async function () {
+      const { nexoidModule, operator, agent1 } =
+        await loadFixture(registeredAgentFixture);
+
+      await nexoidModule.connect(operator).suspendAgent(agent1.address);
+
+      await expect(
+        nexoidModule.connect(operator).reactivateAgent(agent1.address)
+      )
+        .to.emit(nexoidModule, "AgentStatusChanged")
+        .withArgs(operator.address, agent1.address, DelegationStatus.Active);
+    });
+
+    it("should reject suspension of non-active agent", async function () {
+      const { nexoidModule, operator, agent1 } =
+        await loadFixture(registeredAgentFixture);
+
+      await nexoidModule.connect(operator).suspendAgent(agent1.address);
+
+      await expect(
+        nexoidModule.connect(operator).suspendAgent(agent1.address)
+      ).to.be.revertedWith("Can only suspend active agent");
+    });
+
+    it("should reject revocation of already revoked agent", async function () {
+      const { nexoidModule, operator, agent1 } =
+        await loadFixture(registeredAgentFixture);
+
+      await nexoidModule.connect(operator).revokeAgent(agent1.address);
+
+      await expect(
+        nexoidModule.connect(operator).revokeAgent(agent1.address)
+      ).to.be.revertedWith("Already revoked");
+    });
+
+    it("should reject revocation by non-operator", async function () {
+      const { nexoidModule, agent1, stranger } =
+        await loadFixture(registeredAgentFixture);
+
+      await expect(
+        nexoidModule.connect(stranger).revokeAgent(agent1.address)
+      ).to.be.revertedWith("Not operator of this agent Safe");
+    });
+
+    it("should handle expired agents (validUntil)", async function () {
+      const { registry, nexoidModule, registrar, operator, agent1, operatorMeta, agentMeta, credentialHash, scopeHash } =
         await loadFixture(deployFullSystemFixture);
 
       await registry.connect(registrar).registerIdentityFor(
@@ -994,22 +985,33 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
         agent1.address, EntityType.VirtualAgent, agentMeta
       );
 
-      // Short-lived delegation (60 seconds)
+      // Short-lived agent registration (60 seconds)
       const shortFuture = BigInt((await time.latest()) + 60);
-      await delegationRegistry.connect(operator).delegateWithScope(
-        agent1.address, credentialHash, scopeHash, shortFuture, 0, 0
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent1.address, agent1.address, scopeHash, credentialHash, shortFuture
       );
 
       // Valid now
-      let [valid] = await delegationRegistry.isValidDelegation(1);
-      expect(valid).to.be.true;
+      expect(await nexoidModule.isValidAgent(agent1.address)).to.be.true;
 
       // Fast-forward past expiry
       await time.increase(120);
 
       // Now expired
-      [valid] = await delegationRegistry.isValidDelegation(1);
-      expect(valid).to.be.false;
+      expect(await nexoidModule.isValidAgent(agent1.address)).to.be.false;
+    });
+
+    it("should allow revoking from suspended status", async function () {
+      const { nexoidModule, operator, agent1 } =
+        await loadFixture(registeredAgentFixture);
+
+      await nexoidModule.connect(operator).suspendAgent(agent1.address);
+      await nexoidModule.connect(operator).revokeAgent(agent1.address);
+
+      expect(await nexoidModule.isValidAgent(agent1.address)).to.be.false;
+
+      const record = await nexoidModule.getAgentRecord(agent1.address);
+      expect(record.status).to.equal(DelegationStatus.Revoked);
     });
   });
 
@@ -1018,43 +1020,42 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
   // ═══════════════════════════════════════════════════════════════
 
   describe("Phase 8: Complete End-to-End Workflow", function () {
-    it("should execute the full operator → agent → payment workflow", async function () {
+    it("should execute the full operator -> agent -> payment workflow", async function () {
       const {
-        registry, delegationRegistry, allowanceModule, usdc,
+        registry, nexoidModule, allowanceModule, usdc,
         admin, registrar, operator, agent1, recipient,
         operatorMeta, agentMeta, credentialHash, scopeHash, futureTimestamp,
       } = await loadFixture(deployFullSystemFixture);
 
-      // ─── Step 1: Admin authorizes registrar ─────────────────
+      // --- Step 1: Admin authorizes registrar ---
       // (Already done in fixture, but verify)
       expect(await registry.isRegistrar(registrar.address)).to.be.true;
 
-      // ─── Step 2: Registrar registers operator ───────────────
+      // --- Step 2: Registrar registers operator ---
       await registry.connect(registrar).registerIdentityFor(
         operator.address, EntityType.Human, operatorMeta
       );
       expect(await registry.isRegistered(operator.address)).to.be.true;
 
-      // ─── Step 3: Operator creates agent ─────────────────────
+      // --- Step 3: Operator creates agent ---
       await registry.connect(operator).createAgentIdentity(
         agent1.address, EntityType.VirtualAgent, agentMeta
       );
       expect(await registry.ownerOf(agent1.address)).to.equal(operator.address);
 
-      // ─── Step 4: Operator delegates scope to agent ──────────
-      await delegationRegistry.connect(operator).delegateWithScope(
-        agent1.address, credentialHash, scopeHash, futureTimestamp, 0, 1
+      // --- Step 4: Operator registers agent Safe with scope via NexoidModule ---
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent1.address, agent1.address, scopeHash, credentialHash, futureTimestamp
       );
-      const [valid] = await delegationRegistry.isValidDelegation(1);
-      expect(valid).to.be.true;
+      expect(await nexoidModule.isValidAgent(agent1.address)).to.be.true;
 
-      // ─── Step 5: Operator sets USDC allowance for agent ─────
+      // --- Step 5: Operator sets USDC allowance for agent ---
       await allowanceModule.connect(operator).addDelegate(agent1.address);
       await allowanceModule.connect(operator).setAllowance(
         agent1.address, await usdc.getAddress(), toUSDC(100n), 0, 0
       );
 
-      // ─── Step 6: Agent sends USDC to recipient ─────────────
+      // --- Step 6: Agent sends USDC to recipient ---
       await allowanceModule.connect(agent1).executeAllowanceTransfer(
         operator.address, await usdc.getAddress(), recipient.address,
         toUSDC(50n), hre.ethers.ZeroAddress, 0, agent1.address, "0x"
@@ -1062,7 +1063,7 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
 
       expect(await usdc.balanceOf(recipient.address)).to.equal(toUSDC(50n));
 
-      // ─── Step 7: Verify remaining allowance ─────────────────
+      // --- Step 7: Verify remaining allowance ---
       const allowanceResult = await allowanceModule.getTokenAllowance(
         operator.address, agent1.address, await usdc.getAddress()
       );
@@ -1070,7 +1071,7 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
       expect(allowanceResult[1]).to.equal(toUSDC(50n));  // spent
       // remaining = 100 - 50 = 50 USDC
 
-      // ─── Step 8: Agent tries to exceed remaining allowance ──
+      // --- Step 8: Agent tries to exceed remaining allowance ---
       await expect(
         allowanceModule.connect(agent1).executeAllowanceTransfer(
           operator.address, await usdc.getAddress(), recipient.address,
@@ -1078,7 +1079,7 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
         )
       ).to.be.revertedWith("Allowance exceeded");
 
-      // ─── Step 9: Agent sends exactly remaining (50 USDC) ───
+      // --- Step 9: Agent sends exactly remaining (50 USDC) ---
       await allowanceModule.connect(agent1).executeAllowanceTransfer(
         operator.address, await usdc.getAddress(), recipient.address,
         toUSDC(50n), hre.ethers.ZeroAddress, 0, agent1.address, "0x"
@@ -1089,9 +1090,9 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
 
     it("should support multi-agent fleet with independent controls", async function () {
       const {
-        registry, delegationRegistry, allowanceModule, usdc,
+        registry, nexoidModule, allowanceModule, usdc,
         registrar, operator, agent1, agent2, agent3, recipient,
-        operatorMeta, agentMeta, credentialHash, scopeHash, futureTimestamp,
+        operatorMeta, agentMeta, credentialHash, futureTimestamp,
       } = await loadFixture(deployFullSystemFixture);
 
       // Register operator
@@ -1110,19 +1111,19 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
         agent3.address, EntityType.PhysicalAgent, agentMeta
       );
 
-      // Delegate with varying depths
+      // Register agent Safes with different scopes via NexoidModule
       const scope1 = hre.ethers.keccak256(hre.ethers.toUtf8Bytes("scope-trading"));
       const scope2 = hre.ethers.keccak256(hre.ethers.toUtf8Bytes("scope-payments"));
       const scope3 = hre.ethers.keccak256(hre.ethers.toUtf8Bytes("scope-delivery"));
 
-      await delegationRegistry.connect(operator).delegateWithScope(
-        agent1.address, credentialHash, scope1, futureTimestamp, 0, 2
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent1.address, agent1.address, scope1, credentialHash, futureTimestamp
       );
-      await delegationRegistry.connect(operator).delegateWithScope(
-        agent2.address, credentialHash, scope2, futureTimestamp, 0, 0
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent2.address, agent2.address, scope2, credentialHash, futureTimestamp
       );
-      await delegationRegistry.connect(operator).delegateWithScope(
-        agent3.address, credentialHash, scope3, futureTimestamp, 0, 0
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent3.address, agent3.address, scope3, credentialHash, futureTimestamp
       );
 
       // Set different allowances
@@ -1163,13 +1164,13 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
   });
 
   // ═══════════════════════════════════════════════════════════════
-  // PHASE 9: Agent Lifecycle (Suspend, Reactivate, Revoke)
+  // PHASE 9: Agent Identity Lifecycle
   // ═══════════════════════════════════════════════════════════════
 
   describe("Phase 9: Agent Identity Lifecycle", function () {
     async function activeAgentFixture() {
       const fixture = await loadFixture(deployFullSystemFixture);
-      const { registry, delegationRegistry, registrar, operator, agent1, operatorMeta, agentMeta, credentialHash, scopeHash, futureTimestamp } = fixture;
+      const { registry, nexoidModule, registrar, operator, agent1, operatorMeta, agentMeta, credentialHash, scopeHash, futureTimestamp } = fixture;
 
       await registry.connect(registrar).registerIdentityFor(
         operator.address, EntityType.Human, operatorMeta
@@ -1177,11 +1178,11 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
       await registry.connect(operator).createAgentIdentity(
         agent1.address, EntityType.VirtualAgent, agentMeta
       );
-      await delegationRegistry.connect(operator).delegateWithScope(
-        agent1.address, credentialHash, scopeHash, futureTimestamp, 0, 1
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent1.address, agent1.address, scopeHash, credentialHash, futureTimestamp
       );
 
-      return { ...fixture, delegationId: 1n };
+      return fixture;
     }
 
     it("operator should suspend agent identity", async function () {
@@ -1193,29 +1194,45 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
       expect(record.status).to.equal(EntityStatus.Suspended);
     });
 
-    it("suspending agent should invalidate its delegation", async function () {
-      const { registry, delegationRegistry, operator, agent1, delegationId } =
+    it("suspending agent via NexoidModule should invalidate it", async function () {
+      const { nexoidModule, operator, agent1 } =
         await loadFixture(activeAgentFixture);
 
-      await registry.connect(operator).updateStatus(agent1.address, EntityStatus.Suspended);
+      expect(await nexoidModule.isValidAgent(agent1.address)).to.be.true;
 
-      const [valid] = await delegationRegistry.isValidDelegation(delegationId);
-      expect(valid).to.be.false;
+      await nexoidModule.connect(operator).suspendAgent(agent1.address);
+
+      expect(await nexoidModule.isValidAgent(agent1.address)).to.be.false;
     });
 
-    it("reactivating agent should restore delegation validity", async function () {
-      const { registry, delegationRegistry, operator, agent1, delegationId } =
+    it("reactivating agent via NexoidModule should restore validity", async function () {
+      const { nexoidModule, operator, agent1 } =
         await loadFixture(activeAgentFixture);
 
-      await registry.connect(operator).updateStatus(agent1.address, EntityStatus.Suspended);
-      await registry.connect(operator).updateStatus(agent1.address, EntityStatus.Active);
+      await nexoidModule.connect(operator).suspendAgent(agent1.address);
+      expect(await nexoidModule.isValidAgent(agent1.address)).to.be.false;
 
-      const [valid] = await delegationRegistry.isValidDelegation(delegationId);
-      expect(valid).to.be.true;
+      await nexoidModule.connect(operator).reactivateAgent(agent1.address);
+      expect(await nexoidModule.isValidAgent(agent1.address)).to.be.true;
     });
 
-    it("revoking agent identity is permanent", async function () {
-      const { registry, delegationRegistry, operator, agent1, delegationId } =
+    it("revoking agent via NexoidModule is permanent", async function () {
+      const { nexoidModule, operator, agent1 } =
+        await loadFixture(activeAgentFixture);
+
+      await nexoidModule.connect(operator).revokeAgent(agent1.address);
+
+      // Cannot reactivate
+      await expect(
+        nexoidModule.connect(operator).reactivateAgent(agent1.address)
+      ).to.be.revertedWith("Can only reactivate suspended agent");
+
+      // Agent is permanently invalid
+      expect(await nexoidModule.isValidAgent(agent1.address)).to.be.false;
+    });
+
+    it("revoking agent identity in IdentityRegistry is permanent", async function () {
+      const { registry, operator, agent1 } =
         await loadFixture(activeAgentFixture);
 
       await registry.connect(operator).updateStatus(agent1.address, EntityStatus.Revoked);
@@ -1224,18 +1241,22 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
       await expect(
         registry.connect(operator).updateStatus(agent1.address, EntityStatus.Active)
       ).to.be.revertedWith("Cannot update revoked identity");
-
-      // Delegation is permanently invalid
-      const [valid] = await delegationRegistry.isValidDelegation(delegationId);
-      expect(valid).to.be.false;
     });
 
-    it("stranger cannot modify agent status", async function () {
+    it("stranger cannot modify agent status in IdentityRegistry", async function () {
       const { registry, stranger, agent1 } = await loadFixture(activeAgentFixture);
 
       await expect(
         registry.connect(stranger).updateStatus(agent1.address, EntityStatus.Suspended)
       ).to.be.revertedWith("Not authorized");
+    });
+
+    it("stranger cannot suspend agent via NexoidModule", async function () {
+      const { nexoidModule, stranger, agent1 } = await loadFixture(activeAgentFixture);
+
+      await expect(
+        nexoidModule.connect(stranger).suspendAgent(agent1.address)
+      ).to.be.revertedWith("Not operator of this agent Safe");
     });
   });
 
@@ -1246,7 +1267,7 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
   describe("Phase 10: Security Boundaries", function () {
     async function securityFixture() {
       const fixture = await loadFixture(deployFullSystemFixture);
-      const { registry, delegationRegistry, allowanceModule, usdc, registrar, operator, agent1, agent2, subAgent, operatorMeta, agentMeta, credentialHash, scopeHash, futureTimestamp } = fixture;
+      const { registry, nexoidModule, allowanceModule, usdc, registrar, operator, agent1, agent2, subAgent, operatorMeta, agentMeta, credentialHash, scopeHash, futureTimestamp } = fixture;
 
       await registry.connect(registrar).registerIdentityFor(
         operator.address, EntityType.Human, operatorMeta
@@ -1261,9 +1282,9 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
         subAgent.address, EntityType.VirtualAgent, agentMeta
       );
 
-      // Delegate agent1 with depth=2
-      await delegationRegistry.connect(operator).delegateWithScope(
-        agent1.address, credentialHash, scopeHash, futureTimestamp, 0, 2
+      // Register agent1 via NexoidModule with scope
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent1.address, agent1.address, scopeHash, credentialHash, futureTimestamp
       );
 
       // Allowance for agent1: 100 USDC
@@ -1307,18 +1328,17 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
       ).to.be.revertedWith("No allowance set");
     });
 
-    it("delegation does not grant spending — allowance is the hard ceiling", async function () {
-      const { delegationRegistry, allowanceModule, usdc, operator, agent2, recipient, credentialHash, scopeHash, futureTimestamp } =
+    it("NexoidModule registration does not grant spending — allowance is the hard ceiling", async function () {
+      const { nexoidModule, allowanceModule, usdc, operator, agent2, recipient, credentialHash, scopeHash, futureTimestamp } =
         await loadFixture(securityFixture);
 
-      // Agent2 has delegation but no allowance
-      await delegationRegistry.connect(operator).delegateWithScope(
-        agent2.address, credentialHash, scopeHash, futureTimestamp, 0, 0
+      // Register agent2 via NexoidModule (has scope but no allowance)
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent2.address, agent2.address, scopeHash, credentialHash, futureTimestamp
       );
 
-      // Verify delegation is valid
-      const [valid] = await delegationRegistry.isValidDelegation(2);
-      expect(valid).to.be.true;
+      // Verify agent is valid via NexoidModule
+      expect(await nexoidModule.isValidAgent(agent2.address)).to.be.true;
 
       // But agent2 cannot spend (no allowance set on AllowanceModule)
       await expect(
@@ -1360,49 +1380,35 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
       expect(await registry.isRegistrar(stranger.address)).to.be.true;
     });
 
-    it("sub-delegation from revoked parent should fail validation", async function () {
-      const { delegationRegistry, operator, agent1, subAgent, credentialHash, scopeHash, futureTimestamp } =
+    it("non-operator cannot update agent scope via NexoidModule", async function () {
+      const { nexoidModule, agent1, stranger, credentialHash, scopeHash, futureTimestamp } =
         await loadFixture(securityFixture);
 
-      // Agent1 sub-delegates to subAgent
-      await delegationRegistry.connect(agent1).delegateWithScope(
-        subAgent.address, credentialHash, scopeHash, futureTimestamp, 1, 0
-      );
+      const newScopeHash = hre.ethers.keccak256(hre.ethers.toUtf8Bytes("scope-hacked"));
 
-      // Both valid
-      let [validRoot] = await delegationRegistry.isValidDelegation(1);
-      let [validSub] = await delegationRegistry.isValidDelegation(2);
-      expect(validRoot).to.be.true;
-      expect(validSub).to.be.true;
-
-      // Revoke root
-      await delegationRegistry.connect(operator).revokeDelegation(1);
-
-      // Sub is also invalid
-      [validSub] = await delegationRegistry.isValidDelegation(2);
-      expect(validSub).to.be.false;
+      await expect(
+        nexoidModule.connect(stranger).updateAgentScope(
+          agent1.address, newScopeHash, credentialHash, futureTimestamp
+        )
+      ).to.be.revertedWith("Not operator of this agent Safe");
     });
 
-    it("should reject delegation to unregistered address", async function () {
-      const { delegationRegistry, operator, stranger, credentialHash, scopeHash, futureTimestamp } =
+    it("non-operator cannot suspend others' agents via NexoidModule", async function () {
+      const { nexoidModule, agent1, stranger } =
         await loadFixture(securityFixture);
 
       await expect(
-        delegationRegistry.connect(operator).delegateWithScope(
-          stranger.address, credentialHash, scopeHash, futureTimestamp, 0, 0
-        )
-      ).to.be.revertedWith("Subject not registered");
+        nexoidModule.connect(stranger).suspendAgent(agent1.address)
+      ).to.be.revertedWith("Not operator of this agent Safe");
     });
 
-    it("should reject delegation from unregistered address", async function () {
-      const { delegationRegistry, stranger, agent1, credentialHash, scopeHash, futureTimestamp } =
+    it("non-operator cannot revoke others' agents via NexoidModule", async function () {
+      const { nexoidModule, agent1, stranger } =
         await loadFixture(securityFixture);
 
       await expect(
-        delegationRegistry.connect(stranger).delegateWithScope(
-          agent1.address, credentialHash, scopeHash, futureTimestamp, 0, 0
-        )
-      ).to.be.revertedWith("Issuer not registered");
+        nexoidModule.connect(stranger).revokeAgent(agent1.address)
+      ).to.be.revertedWith("Not operator of this agent Safe");
     });
 
     it("delegate removal prevents future transfers", async function () {
@@ -1460,9 +1466,9 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
   // ═══════════════════════════════════════════════════════════════
 
   describe("Phase 11: Organization Workflow", function () {
-    it("should support full Organization → Agent workflow", async function () {
+    it("should support full Organization -> Agent workflow", async function () {
       const {
-        registry, delegationRegistry, allowanceModule, usdc,
+        registry, nexoidModule, allowanceModule, usdc,
         registrar, operator2, agent1, recipient,
         operatorMeta, agentMeta, credentialHash, scopeHash, futureTimestamp,
       } = await loadFixture(deployFullSystemFixture);
@@ -1487,10 +1493,11 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
       );
       expect(await registry.ownerOf(agent1.address)).to.equal(operator2.address);
 
-      // Org delegates
-      await delegationRegistry.connect(operator2).delegateWithScope(
-        agent1.address, credentialHash, scopeHash, futureTimestamp, 0, 1
+      // Org registers agent Safe with scope via NexoidModule
+      await nexoidModule.connect(operator2).registerAgentSafe(
+        agent1.address, agent1.address, scopeHash, credentialHash, futureTimestamp
       );
+      expect(await nexoidModule.isValidAgent(agent1.address)).to.be.true;
 
       // Org sets allowance
       await allowanceModule.connect(operator2).addDelegate(agent1.address);
@@ -1563,47 +1570,64 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
   });
 
   // ═══════════════════════════════════════════════════════════════
-  // PHASE 11: NexoidModule — Agent Safe Registry
+  // PHASE 13: NexoidModule — Comprehensive Agent Safe Registry
   // ═══════════════════════════════════════════════════════════════
 
-  describe("Phase 11: NexoidModule", function () {
-    async function deployWithNexoidModuleFixture() {
+  describe("Phase 13: NexoidModule Comprehensive Tests", function () {
+    async function nexoidModuleFixture() {
       const fixture = await loadFixture(deployFullSystemFixture);
+      const { registry, registrar, operator, operatorMeta, agentMeta, agent1, agent2, agent3 } = fixture;
 
-      const NexoidModule = await hre.ethers.getContractFactory("NexoidModule");
-      const nexoidModule = await NexoidModule.connect(fixture.admin).deploy();
+      // Register operator
+      await registry.connect(registrar).registerIdentityFor(
+        operator.address, EntityType.Human, operatorMeta
+      );
 
-      return { ...fixture, nexoidModule };
+      // Create agents in IdentityRegistry
+      await registry.connect(operator).createAgentIdentity(
+        agent1.address, EntityType.VirtualAgent, agentMeta
+      );
+      await registry.connect(operator).createAgentIdentity(
+        agent2.address, EntityType.VirtualAgent, agentMeta
+      );
+      await registry.connect(operator).createAgentIdentity(
+        agent3.address, EntityType.PhysicalAgent, agentMeta
+      );
+
+      return fixture;
     }
 
     it("should deploy NexoidModule successfully", async function () {
-      const { nexoidModule } = await loadFixture(deployWithNexoidModuleFixture);
+      const { nexoidModule } = await loadFixture(nexoidModuleFixture);
       expect(await nexoidModule.getAddress()).to.be.properAddress;
     });
 
-    it("should register an agent Safe under an operator", async function () {
-      const { nexoidModule, operator, agent1 } =
-        await loadFixture(deployWithNexoidModuleFixture);
-
-      // operator.address acts as the operator Safe in tests
-      const agentSafeAddr = agent1.address; // simulated agent Safe
+    it("should register agent Safe with 5-param registerAgentSafe", async function () {
+      const { nexoidModule, operator, agent1, credentialHash, scopeHash, futureTimestamp } =
+        await loadFixture(nexoidModuleFixture);
 
       await expect(
-        nexoidModule.connect(operator).registerAgentSafe(agentSafeAddr, agent1.address)
+        nexoidModule.connect(operator).registerAgentSafe(
+          agent1.address, agent1.address, scopeHash, credentialHash, futureTimestamp
+        )
       )
         .to.emit(nexoidModule, "AgentSafeRegistered")
-        .withArgs(operator.address, agentSafeAddr, agent1.address);
+        .withArgs(operator.address, agent1.address, agent1.address);
 
       expect(await nexoidModule.agentCount(operator.address)).to.equal(1);
-      expect(await nexoidModule.getOperator(agentSafeAddr)).to.equal(operator.address);
+      expect(await nexoidModule.getOperator(agent1.address)).to.equal(operator.address);
     });
 
     it("should register multiple agent Safes", async function () {
-      const { nexoidModule, operator, agent1, agent2 } =
-        await loadFixture(deployWithNexoidModuleFixture);
+      const { nexoidModule, operator, agent1, agent2, credentialHash, scopeHash, futureTimestamp } =
+        await loadFixture(nexoidModuleFixture);
 
-      await nexoidModule.connect(operator).registerAgentSafe(agent1.address, agent1.address);
-      await nexoidModule.connect(operator).registerAgentSafe(agent2.address, agent2.address);
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent1.address, agent1.address, scopeHash, credentialHash, futureTimestamp
+      );
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent2.address, agent2.address, scopeHash, credentialHash, futureTimestamp
+      );
 
       expect(await nexoidModule.agentCount(operator.address)).to.equal(2);
 
@@ -1614,45 +1638,59 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
     });
 
     it("should return correct reverse lookup (getOperator)", async function () {
-      const { nexoidModule, operator, agent1 } =
-        await loadFixture(deployWithNexoidModuleFixture);
+      const { nexoidModule, operator, agent1, credentialHash, scopeHash, futureTimestamp } =
+        await loadFixture(nexoidModuleFixture);
 
-      await nexoidModule.connect(operator).registerAgentSafe(agent1.address, agent1.address);
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent1.address, agent1.address, scopeHash, credentialHash, futureTimestamp
+      );
 
       expect(await nexoidModule.getOperator(agent1.address)).to.equal(operator.address);
       expect(await nexoidModule.operatorOf(agent1.address)).to.equal(operator.address);
     });
 
     it("should reject duplicate agent Safe registration", async function () {
-      const { nexoidModule, operator, agent1 } =
-        await loadFixture(deployWithNexoidModuleFixture);
+      const { nexoidModule, operator, agent1, credentialHash, scopeHash, futureTimestamp } =
+        await loadFixture(nexoidModuleFixture);
 
-      await nexoidModule.connect(operator).registerAgentSafe(agent1.address, agent1.address);
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent1.address, agent1.address, scopeHash, credentialHash, futureTimestamp
+      );
 
       await expect(
-        nexoidModule.connect(operator).registerAgentSafe(agent1.address, agent1.address)
+        nexoidModule.connect(operator).registerAgentSafe(
+          agent1.address, agent1.address, scopeHash, credentialHash, futureTimestamp
+        )
       ).to.be.revertedWith("Agent Safe already registered");
     });
 
     it("should reject registration with zero addresses", async function () {
-      const { nexoidModule, operator, agent1 } =
-        await loadFixture(deployWithNexoidModuleFixture);
+      const { nexoidModule, operator, agent1, credentialHash, scopeHash, futureTimestamp } =
+        await loadFixture(nexoidModuleFixture);
 
       await expect(
-        nexoidModule.connect(operator).registerAgentSafe(hre.ethers.ZeroAddress, agent1.address)
+        nexoidModule.connect(operator).registerAgentSafe(
+          hre.ethers.ZeroAddress, agent1.address, scopeHash, credentialHash, futureTimestamp
+        )
       ).to.be.revertedWith("Invalid agent Safe");
 
       await expect(
-        nexoidModule.connect(operator).registerAgentSafe(agent1.address, hre.ethers.ZeroAddress)
+        nexoidModule.connect(operator).registerAgentSafe(
+          agent1.address, hre.ethers.ZeroAddress, scopeHash, credentialHash, futureTimestamp
+        )
       ).to.be.revertedWith("Invalid agent EOA");
     });
 
     it("should remove an agent Safe", async function () {
-      const { nexoidModule, operator, agent1, agent2 } =
-        await loadFixture(deployWithNexoidModuleFixture);
+      const { nexoidModule, operator, agent1, agent2, credentialHash, scopeHash, futureTimestamp } =
+        await loadFixture(nexoidModuleFixture);
 
-      await nexoidModule.connect(operator).registerAgentSafe(agent1.address, agent1.address);
-      await nexoidModule.connect(operator).registerAgentSafe(agent2.address, agent2.address);
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent1.address, agent1.address, scopeHash, credentialHash, futureTimestamp
+      );
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent2.address, agent2.address, scopeHash, credentialHash, futureTimestamp
+      );
 
       await expect(
         nexoidModule.connect(operator).removeAgentSafe(agent1.address)
@@ -1670,10 +1708,12 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
     });
 
     it("should reject removal by non-operator", async function () {
-      const { nexoidModule, operator, agent1, stranger } =
-        await loadFixture(deployWithNexoidModuleFixture);
+      const { nexoidModule, operator, agent1, stranger, credentialHash, scopeHash, futureTimestamp } =
+        await loadFixture(nexoidModuleFixture);
 
-      await nexoidModule.connect(operator).registerAgentSafe(agent1.address, agent1.address);
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent1.address, agent1.address, scopeHash, credentialHash, futureTimestamp
+      );
 
       await expect(
         nexoidModule.connect(stranger).removeAgentSafe(agent1.address)
@@ -1682,7 +1722,7 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
 
     it("should return empty array for operator with no agents", async function () {
       const { nexoidModule, stranger } =
-        await loadFixture(deployWithNexoidModuleFixture);
+        await loadFixture(nexoidModuleFixture);
 
       const agents = await nexoidModule.getAgentSafes(stranger.address);
       expect(agents.length).to.equal(0);
@@ -1691,31 +1731,264 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
 
     it("should return zero address for unregistered agent Safe", async function () {
       const { nexoidModule, stranger } =
-        await loadFixture(deployWithNexoidModuleFixture);
+        await loadFixture(nexoidModuleFixture);
 
       expect(await nexoidModule.getOperator(stranger.address)).to.equal(hre.ethers.ZeroAddress);
     });
 
     it("should store createdAt timestamp", async function () {
-      const { nexoidModule, operator, agent1 } =
-        await loadFixture(deployWithNexoidModuleFixture);
+      const { nexoidModule, operator, agent1, credentialHash, scopeHash, futureTimestamp } =
+        await loadFixture(nexoidModuleFixture);
 
-      await nexoidModule.connect(operator).registerAgentSafe(agent1.address, agent1.address);
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent1.address, agent1.address, scopeHash, credentialHash, futureTimestamp
+      );
 
       const agents = await nexoidModule.getAgentSafes(operator.address);
       expect(agents[0].createdAt).to.be.greaterThan(0);
     });
 
     it("should allow re-registration after removal", async function () {
-      const { nexoidModule, operator, agent1 } =
-        await loadFixture(deployWithNexoidModuleFixture);
+      const { nexoidModule, operator, agent1, credentialHash, scopeHash, futureTimestamp } =
+        await loadFixture(nexoidModuleFixture);
 
-      await nexoidModule.connect(operator).registerAgentSafe(agent1.address, agent1.address);
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent1.address, agent1.address, scopeHash, credentialHash, futureTimestamp
+      );
       await nexoidModule.connect(operator).removeAgentSafe(agent1.address);
 
       // Should succeed after removal
-      await nexoidModule.connect(operator).registerAgentSafe(agent1.address, agent1.address);
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent1.address, agent1.address, scopeHash, credentialHash, futureTimestamp
+      );
       expect(await nexoidModule.agentCount(operator.address)).to.equal(1);
+    });
+
+    it("should update agent scope", async function () {
+      const { nexoidModule, operator, agent1, credentialHash, scopeHash, futureTimestamp } =
+        await loadFixture(nexoidModuleFixture);
+
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent1.address, agent1.address, scopeHash, credentialHash, futureTimestamp
+      );
+
+      const newScopeHash = hre.ethers.keccak256(hre.ethers.toUtf8Bytes("scope-updated"));
+      const newCredentialHash = hre.ethers.keccak256(hre.ethers.toUtf8Bytes("credential-updated"));
+      const newValidUntil = futureTimestamp + 86400n;
+
+      await expect(
+        nexoidModule.connect(operator).updateAgentScope(
+          agent1.address, newScopeHash, newCredentialHash, newValidUntil
+        )
+      )
+        .to.emit(nexoidModule, "AgentScopeUpdated")
+        .withArgs(operator.address, agent1.address, newScopeHash, newCredentialHash, newValidUntil);
+
+      const record = await nexoidModule.getAgentRecord(agent1.address);
+      expect(record.scopeHash).to.equal(newScopeHash);
+      expect(record.credentialHash).to.equal(newCredentialHash);
+      expect(record.validUntil).to.equal(newValidUntil);
+    });
+
+    it("should suspend an active agent", async function () {
+      const { nexoidModule, operator, agent1, credentialHash, scopeHash, futureTimestamp } =
+        await loadFixture(nexoidModuleFixture);
+
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent1.address, agent1.address, scopeHash, credentialHash, futureTimestamp
+      );
+
+      await expect(
+        nexoidModule.connect(operator).suspendAgent(agent1.address)
+      )
+        .to.emit(nexoidModule, "AgentStatusChanged")
+        .withArgs(operator.address, agent1.address, DelegationStatus.Suspended);
+
+      expect(await nexoidModule.isValidAgent(agent1.address)).to.be.false;
+
+      const record = await nexoidModule.getAgentRecord(agent1.address);
+      expect(record.status).to.equal(DelegationStatus.Suspended);
+    });
+
+    it("should revoke an agent", async function () {
+      const { nexoidModule, operator, agent1, credentialHash, scopeHash, futureTimestamp } =
+        await loadFixture(nexoidModuleFixture);
+
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent1.address, agent1.address, scopeHash, credentialHash, futureTimestamp
+      );
+
+      await expect(
+        nexoidModule.connect(operator).revokeAgent(agent1.address)
+      )
+        .to.emit(nexoidModule, "AgentStatusChanged")
+        .withArgs(operator.address, agent1.address, DelegationStatus.Revoked);
+
+      expect(await nexoidModule.isValidAgent(agent1.address)).to.be.false;
+
+      const record = await nexoidModule.getAgentRecord(agent1.address);
+      expect(record.status).to.equal(DelegationStatus.Revoked);
+    });
+
+    it("should reactivate a suspended agent", async function () {
+      const { nexoidModule, operator, agent1, credentialHash, scopeHash, futureTimestamp } =
+        await loadFixture(nexoidModuleFixture);
+
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent1.address, agent1.address, scopeHash, credentialHash, futureTimestamp
+      );
+
+      await nexoidModule.connect(operator).suspendAgent(agent1.address);
+      expect(await nexoidModule.isValidAgent(agent1.address)).to.be.false;
+
+      await expect(
+        nexoidModule.connect(operator).reactivateAgent(agent1.address)
+      )
+        .to.emit(nexoidModule, "AgentStatusChanged")
+        .withArgs(operator.address, agent1.address, DelegationStatus.Active);
+
+      expect(await nexoidModule.isValidAgent(agent1.address)).to.be.true;
+
+      const record = await nexoidModule.getAgentRecord(agent1.address);
+      expect(record.status).to.equal(DelegationStatus.Active);
+    });
+
+    it("should validate agent via isValidAgent (active + not expired)", async function () {
+      const { nexoidModule, operator, agent1, credentialHash, scopeHash, futureTimestamp } =
+        await loadFixture(nexoidModuleFixture);
+
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent1.address, agent1.address, scopeHash, credentialHash, futureTimestamp
+      );
+
+      // Active and not expired
+      expect(await nexoidModule.isValidAgent(agent1.address)).to.be.true;
+
+      // Not registered
+      expect(await nexoidModule.isValidAgent(hre.ethers.ZeroAddress)).to.be.false;
+    });
+
+    it("should return full agent record via getAgentRecord", async function () {
+      const { nexoidModule, operator, agent1, credentialHash, scopeHash, futureTimestamp } =
+        await loadFixture(nexoidModuleFixture);
+
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent1.address, agent1.address, scopeHash, credentialHash, futureTimestamp
+      );
+
+      const record = await nexoidModule.getAgentRecord(agent1.address);
+      expect(record.agentSafe).to.equal(agent1.address);
+      expect(record.agentEOA).to.equal(agent1.address);
+      expect(record.scopeHash).to.equal(scopeHash);
+      expect(record.credentialHash).to.equal(credentialHash);
+      expect(record.validUntil).to.equal(futureTimestamp);
+      expect(record.status).to.equal(DelegationStatus.Active);
+      expect(record.createdAt).to.be.greaterThan(0);
+    });
+
+    it("should revert getAgentRecord for unregistered agent", async function () {
+      const { nexoidModule, stranger } =
+        await loadFixture(nexoidModuleFixture);
+
+      await expect(
+        nexoidModule.getAgentRecord(stranger.address)
+      ).to.be.revertedWith("Agent not registered");
+    });
+
+    it("should reject suspending non-active agent", async function () {
+      const { nexoidModule, operator, agent1, credentialHash, scopeHash, futureTimestamp } =
+        await loadFixture(nexoidModuleFixture);
+
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent1.address, agent1.address, scopeHash, credentialHash, futureTimestamp
+      );
+
+      await nexoidModule.connect(operator).suspendAgent(agent1.address);
+
+      await expect(
+        nexoidModule.connect(operator).suspendAgent(agent1.address)
+      ).to.be.revertedWith("Can only suspend active agent");
+    });
+
+    it("should reject revoking already revoked agent", async function () {
+      const { nexoidModule, operator, agent1, credentialHash, scopeHash, futureTimestamp } =
+        await loadFixture(nexoidModuleFixture);
+
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent1.address, agent1.address, scopeHash, credentialHash, futureTimestamp
+      );
+
+      await nexoidModule.connect(operator).revokeAgent(agent1.address);
+
+      await expect(
+        nexoidModule.connect(operator).revokeAgent(agent1.address)
+      ).to.be.revertedWith("Already revoked");
+    });
+
+    it("should reject reactivating non-suspended agent", async function () {
+      const { nexoidModule, operator, agent1, credentialHash, scopeHash, futureTimestamp } =
+        await loadFixture(nexoidModuleFixture);
+
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent1.address, agent1.address, scopeHash, credentialHash, futureTimestamp
+      );
+
+      // Active agent — cannot reactivate
+      await expect(
+        nexoidModule.connect(operator).reactivateAgent(agent1.address)
+      ).to.be.revertedWith("Can only reactivate suspended agent");
+    });
+
+    it("should handle agent expiry correctly", async function () {
+      const { nexoidModule, operator, agent1, credentialHash, scopeHash } =
+        await loadFixture(nexoidModuleFixture);
+
+      // Short-lived agent (60 seconds)
+      const shortFuture = BigInt((await time.latest()) + 60);
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent1.address, agent1.address, scopeHash, credentialHash, shortFuture
+      );
+
+      // Valid now
+      expect(await nexoidModule.isValidAgent(agent1.address)).to.be.true;
+
+      // Fast-forward past expiry
+      await time.increase(120);
+
+      // Now expired
+      expect(await nexoidModule.isValidAgent(agent1.address)).to.be.false;
+    });
+
+    it("should allow revoking from suspended status", async function () {
+      const { nexoidModule, operator, agent1, credentialHash, scopeHash, futureTimestamp } =
+        await loadFixture(nexoidModuleFixture);
+
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent1.address, agent1.address, scopeHash, credentialHash, futureTimestamp
+      );
+
+      await nexoidModule.connect(operator).suspendAgent(agent1.address);
+      await nexoidModule.connect(operator).revokeAgent(agent1.address);
+
+      expect(await nexoidModule.isValidAgent(agent1.address)).to.be.false;
+
+      const record = await nexoidModule.getAgentRecord(agent1.address);
+      expect(record.status).to.equal(DelegationStatus.Revoked);
+    });
+
+    it("should not allow reactivating a revoked agent", async function () {
+      const { nexoidModule, operator, agent1, credentialHash, scopeHash, futureTimestamp } =
+        await loadFixture(nexoidModuleFixture);
+
+      await nexoidModule.connect(operator).registerAgentSafe(
+        agent1.address, agent1.address, scopeHash, credentialHash, futureTimestamp
+      );
+
+      await nexoidModule.connect(operator).revokeAgent(agent1.address);
+
+      await expect(
+        nexoidModule.connect(operator).reactivateAgent(agent1.address)
+      ).to.be.revertedWith("Can only reactivate suspended agent");
     });
   });
 });

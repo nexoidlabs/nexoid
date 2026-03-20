@@ -1,7 +1,7 @@
 // Types
 export type {
   IdentityRecord,
-  DelegationRecord,
+  AgentRecord,
   AgentScope,
   BudgetLimit,
   MaxTransactionAmount,
@@ -31,15 +31,17 @@ export {
   type IdentityOps,
 } from './identity.js';
 
-// Delegation operations
+// Agent scope operations (replaces delegation)
 export {
-  delegateWithScope,
-  revokeDelegation,
-  validateDelegation,
-  getDelegation,
+  updateAgentScope,
+  suspendAgent,
+  revokeAgent,
+  reactivateAgent,
+  isValidAgent,
+  getAgentRecord,
   computeScopeHash,
-  type DelegationOps,
-} from './delegation.js';
+  type AgentOps,
+} from './agent-scope.js';
 
 // Wallet operations
 export {
@@ -69,4 +71,4 @@ export {
 } from './safe.js';
 
 // ABIs
-export { IdentityRegistryABI, DelegationRegistryABI, AllowanceModuleABI, NexoidModuleABI } from './abi/index.js';
+export { IdentityRegistryABI, AllowanceModuleABI, NexoidModuleABI } from './abi/index.js';

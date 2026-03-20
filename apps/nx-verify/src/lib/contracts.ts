@@ -7,7 +7,7 @@ import {
 } from "viem";
 import { mainnet, sepolia, hardhat } from "viem/chains";
 
-// Reuse the same ABIs from nx-platform for identity/delegation reads
+// Reuse the same ABIs from nx-platform for identity/agent reads
 export const IDENTITY_REGISTRY_ABI = [
   {
     type: "function",
@@ -44,37 +44,32 @@ export const IDENTITY_REGISTRY_ABI = [
   },
 ] as const;
 
-export const DELEGATION_REGISTRY_ABI = [
+export const NEXOID_MODULE_ABI = [
   {
     type: "function",
-    name: "getDelegation",
-    inputs: [{ name: "delegationId", type: "uint256" }],
+    name: "isValidAgent",
+    inputs: [{ name: "agentSafe", type: "address" }],
+    outputs: [{ name: "", type: "bool" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "getAgentRecord",
+    inputs: [{ name: "agentSafe", type: "address" }],
     outputs: [
       {
         name: "",
         type: "tuple",
         components: [
-          { name: "issuer", type: "address" },
-          { name: "subject", type: "address" },
-          { name: "credentialHash", type: "bytes32" },
+          { name: "agentSafe", type: "address" },
+          { name: "agentEOA", type: "address" },
+          { name: "createdAt", type: "uint64" },
           { name: "scopeHash", type: "bytes32" },
-          { name: "validFrom", type: "uint64" },
+          { name: "credentialHash", type: "bytes32" },
           { name: "validUntil", type: "uint64" },
-          { name: "parentDelegationId", type: "uint256" },
-          { name: "delegationDepth", type: "uint8" },
           { name: "status", type: "uint8" },
         ],
       },
-    ],
-    stateMutability: "view",
-  },
-  {
-    type: "function",
-    name: "isValidDelegation",
-    inputs: [{ name: "delegationId", type: "uint256" }],
-    outputs: [
-      { name: "valid", type: "bool" },
-      { name: "depth", type: "uint8" },
     ],
     stateMutability: "view",
   },
@@ -109,7 +104,7 @@ export function getRegistryAddress(): Address {
     "0x5FbDB2315678afecb367f032d93F642f64180aa3") as Address;
 }
 
-export function getDelegationRegistryAddress(): Address {
+export function getNexoidModuleAddress(): Address {
   return (process.env.NEXT_PUBLIC_MODULE_ADDRESS ??
     "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512") as Address;
 }

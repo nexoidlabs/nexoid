@@ -138,7 +138,7 @@ export async function GET(request: NextRequest) {
             abi: NEXOID_MODULE_ABI,
             functionName: "getAgentSafes",
             args: [safeAddress],
-          }) as Array<{ agentSafe: Address; agentEOA: Address; createdAt: bigint }>;
+          }) as unknown as Array<{ agentSafe: Address; agentEOA: Address; createdAt: bigint; scopeHash: `0x${string}`; credentialHash: `0x${string}`; validUntil: bigint; status: number }>;
 
           const agentSafeDetails = await Promise.all(
             agentSafes.map(async (record) => {

@@ -27,12 +27,12 @@ console.log(output);
 
 // Parse contract addresses from output
 const registryMatch = output.match(/IdentityRegistry:\s*(0x[a-fA-F0-9]+)/);
-const delegationMatch = output.match(/DelegationRegistry:\s*(0x[a-fA-F0-9]+)/);
+const moduleMatch = output.match(/NexoidModule:\s*(0x[a-fA-F0-9]+)/);
 
-if (registryMatch && delegationMatch) {
+if (registryMatch && moduleMatch) {
   const config = JSON.parse(readFileSync(configPath, "utf-8"));
   config.contracts.identityRegistry = registryMatch[1];
-  config.contracts.delegationRegistry = delegationMatch[1];
+  config.contracts.nexoidModule = moduleMatch[1];
   writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
   console.log("\nContract addresses saved to demo-config.json");
 } else {

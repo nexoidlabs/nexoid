@@ -11,13 +11,12 @@ interface Identity {
   did: string;
 }
 
-interface Delegation {
-  id: number;
-  issuer: string;
-  subject: string;
-  status: string;
-  chainValid: boolean;
-  delegationDepth: number;
+interface AgentRecord {
+  agentSafe: string;
+  agentEOA: string;
+  status: number;
+  statusName: string;
+  validUntil: number;
 }
 
 function ScoreRing({
@@ -64,7 +63,7 @@ function ScoreRing({
 
 export default function Dashboard() {
   const [identities, setIdentities] = useState<Identity[]>([]);
-  const [delegations, setDelegations] = useState<Delegation[]>([]);
+  const [delegations, setDelegations] = useState<AgentRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -75,7 +74,7 @@ export default function Dashboard() {
     ])
       .then(([idData, delData]) => {
         setIdentities(idData.identities ?? []);
-        setDelegations(delData.delegations ?? []);
+        setDelegations(delData.agents ?? []);
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
@@ -87,8 +86,8 @@ export default function Dashboard() {
   ).length;
   const orgs = identities.filter((i) => i.entityType === "Organization").length;
   const activeIds = identities.filter((i) => i.status === "Active").length;
-  const activeDelegations = delegations.filter(
-    (d) => d.status === "Active" && d.chainValid
+  const validAgents = delegations.filter(
+    (d) => d.status === 0 && (d.validUntil === 0 || d.validUntil > Date.now() / 1000)
   ).length;
 
   if (loading) return <div className="loading">Loading registry data...</div>;
@@ -106,10 +105,10 @@ export default function Dashboard() {
           color="var(--success)"
         />
         <ScoreRing
-          value={activeDelegations}
+          value={validAgents}
           max={Math.max(delegations.length, 1)}
-          label="Delegation Validity"
-          desc={`${activeDelegations} of ${delegations.length} valid`}
+          label="Agent Validity"
+          desc={`${validAgents} of ${delegations.length} valid`}
           color="var(--accent)"
         />
         <ScoreRing
@@ -141,15 +140,15 @@ export default function Dashboard() {
           <div className="stat-icon" style={{ background: "var(--cyan-soft)", color: "var(--cyan)" }}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
           </div>
-          <div className="label">Delegations</div>
+          <div className="label">Agent Scopes</div>
           <div className="value">{delegations.length}</div>
         </div>
         <div className="stat-card">
           <div className="stat-icon" style={{ background: "var(--purple-soft)", color: "var(--purple)" }}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
           </div>
-          <div className="label">Valid Chains</div>
-          <div className="value" style={{ color: "var(--success)" }}>{activeDelegations}</div>
+          <div className="label">Valid Agents</div>
+          <div className="value" style={{ color: "var(--success)" }}>{validAgents}</div>
         </div>
       </div>
 
@@ -225,36 +224,34 @@ export default function Dashboard() {
         <div className="card">
           <div className="card-header">
             <div>
-              <div className="card-title">Recent Delegations</div>
-              <div className="card-subtitle">{delegations.length} total created</div>
+              <div className="card-title">Recent Agents</div>
+              <div className="card-subtitle">{delegations.length} total registered</div>
             </div>
             <a href="/delegations" className="btn btn-sm">View all</a>
           </div>
           {delegations.length === 0 ? (
-            <p style={{ color: "var(--text-muted)", fontSize: "13px" }}>No delegations created yet.</p>
+            <p style={{ color: "var(--text-muted)", fontSize: "13px" }}>No agents registered yet.</p>
           ) : (
             <table>
               <thead>
                 <tr>
-                  <th>ID</th>
-                  <th>Issuer</th>
-                  <th>Subject</th>
+                  <th>Agent Safe</th>
+                  <th>Agent EOA</th>
                   <th>Status</th>
                 </tr>
               </thead>
               <tbody>
                 {delegations.slice(0, 5).map((d) => (
-                  <tr key={d.id}>
-                    <td className="mono">#{d.id}</td>
+                  <tr key={d.agentSafe}>
                     <td className="mono">
-                      {d.issuer.slice(0, 6)}...{d.issuer.slice(-4)}
+                      {d.agentSafe.slice(0, 6)}...{d.agentSafe.slice(-4)}
                     </td>
                     <td className="mono">
-                      {d.subject.slice(0, 6)}...{d.subject.slice(-4)}
+                      {d.agentEOA.slice(0, 6)}...{d.agentEOA.slice(-4)}
                     </td>
                     <td>
-                      <span className={`badge badge-${d.status.toLowerCase()}`}>
-                        {d.chainValid ? d.status : "Invalid"}
+                      <span className={`badge badge-${d.statusName.toLowerCase()}`}>
+                        {d.status === 0 && (d.validUntil === 0 || d.validUntil > Date.now() / 1000) ? d.statusName : "Invalid"}
                       </span>
                     </td>
                   </tr>

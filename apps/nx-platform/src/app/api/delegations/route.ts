@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import {
   getPublicClient,
   getModuleAddress,
-  SAFE_IDENTITY_MODULE_ABI,
-  DELEGATION_STATUSES,
+  NEXOID_MODULE_ABI,
+  AGENT_STATUSES,
 } from "@/lib/contracts";
 
 function sanitizeError(msg: string): string {
@@ -13,43 +13,39 @@ function sanitizeError(msg: string): string {
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const id = searchParams.get("id");
+  const agentAddress = searchParams.get("agent");
+  const operator = searchParams.get("operator");
 
   const client = getPublicClient();
   const moduleAddress = getModuleAddress();
 
-  // Single delegation lookup
-  if (id) {
+  // Single agent lookup
+  if (agentAddress) {
     try {
       const record = await client.readContract({
         address: moduleAddress,
-        abi: SAFE_IDENTITY_MODULE_ABI,
-        functionName: "getDelegation",
-        args: [BigInt(id)],
+        abi: NEXOID_MODULE_ABI,
+        functionName: "getAgentRecord",
+        args: [agentAddress as `0x${string}`],
       });
 
-      const [valid, depth] = await client.readContract({
+      const valid = await client.readContract({
         address: moduleAddress,
-        abi: SAFE_IDENTITY_MODULE_ABI,
-        functionName: "isValidDelegation",
-        args: [BigInt(id)],
+        abi: NEXOID_MODULE_ABI,
+        functionName: "isValidAgent",
+        args: [agentAddress as `0x${string}`],
       });
 
       return NextResponse.json({
-        delegation: {
-          id: Number(id),
-          issuer: record.issuer,
-          subject: record.subject,
-          credentialHash: record.credentialHash,
+        agent: {
+          agentSafe: record.agentSafe,
+          agentEOA: record.agentEOA,
           scopeHash: record.scopeHash,
-          validFrom: Number(record.validFrom),
+          credentialHash: record.credentialHash,
           validUntil: Number(record.validUntil),
-          parentDelegationId: Number(record.parentDelegationId),
-          delegationDepth: record.delegationDepth,
-          status: DELEGATION_STATUSES[record.status],
-          statusId: record.status,
-          chainValid: valid,
-          chainDepth: depth,
+          status: record.status,
+          statusName: AGENT_STATUSES[record.status],
+          valid,
         },
       });
     } catch (e) {
@@ -60,67 +56,30 @@ export async function GET(request: Request) {
     }
   }
 
-  // List all delegations by scanning events
+  // List all agents for an operator by querying getAgentSafes
   try {
-    const logs = await client.getLogs({
+    // Use the operator param, or fall back to a zero-address query
+    // In practice the frontend should pass the connected wallet as operator
+    const operatorAddress = operator ?? "0x0000000000000000000000000000000000000000";
+
+    const records = await client.readContract({
       address: moduleAddress,
-      event: {
-        type: "event",
-        name: "DelegationCreated",
-        inputs: [
-          { name: "delegationId", type: "uint256", indexed: true },
-          { name: "issuer", type: "address", indexed: true },
-          { name: "subject", type: "address", indexed: true },
-          { name: "scopeHash", type: "bytes32", indexed: false },
-          { name: "delegationDepth", type: "uint8", indexed: false },
-          { name: "validUntil", type: "uint64", indexed: false },
-        ],
-      },
-      fromBlock: 0n,
-      toBlock: "latest",
+      abi: NEXOID_MODULE_ABI,
+      functionName: "getAgentSafes",
+      args: [operatorAddress as `0x${string}`],
     });
 
-    const delegations = await Promise.all(
-      logs.map(async (log) => {
-        const delegationId = log.args.delegationId!;
-        const record = await client.readContract({
-          address: moduleAddress,
-          abi: SAFE_IDENTITY_MODULE_ABI,
-          functionName: "getDelegation",
-          args: [delegationId],
-        });
+    const agents = (records as any[]).map((record: any) => ({
+      agentSafe: record.agentSafe,
+      agentEOA: record.agentEOA,
+      scopeHash: record.scopeHash,
+      credentialHash: record.credentialHash,
+      validUntil: Number(record.validUntil),
+      status: record.status,
+      statusName: AGENT_STATUSES[record.status],
+    }));
 
-        let chainValid = false;
-        try {
-          const [valid] = await client.readContract({
-            address: moduleAddress,
-            abi: SAFE_IDENTITY_MODULE_ABI,
-            functionName: "isValidDelegation",
-            args: [delegationId],
-          });
-          chainValid = valid;
-        } catch {
-          // Chain validation may revert for invalid states
-        }
-
-        return {
-          id: Number(delegationId),
-          issuer: record.issuer,
-          subject: record.subject,
-          scopeHash: record.scopeHash,
-          validFrom: Number(record.validFrom),
-          validUntil: Number(record.validUntil),
-          parentDelegationId: Number(record.parentDelegationId),
-          delegationDepth: record.delegationDepth,
-          status: DELEGATION_STATUSES[record.status],
-          statusId: record.status,
-          chainValid,
-          blockNumber: Number(log.blockNumber),
-        };
-      })
-    );
-
-    return NextResponse.json({ delegations });
+    return NextResponse.json({ agents });
   } catch (e) {
     return NextResponse.json(
       { error: sanitizeError((e as Error).message) },

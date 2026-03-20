@@ -12,6 +12,9 @@ export const NexoidModuleABI = [
     inputs: [
       { name: 'agentSafe', type: 'address' },
       { name: 'agentEOA', type: 'address' },
+      { name: 'scopeHash', type: 'bytes32' },
+      { name: 'credentialHash', type: 'bytes32' },
+      { name: 'validUntil', type: 'uint64' },
     ],
     outputs: [],
     stateMutability: 'nonpayable',
@@ -25,6 +28,67 @@ export const NexoidModuleABI = [
   },
   {
     type: 'function',
+    name: 'updateAgentScope',
+    inputs: [
+      { name: 'agentSafe', type: 'address' },
+      { name: 'scopeHash', type: 'bytes32' },
+      { name: 'credentialHash', type: 'bytes32' },
+      { name: 'validUntil', type: 'uint64' },
+    ],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    name: 'suspendAgent',
+    inputs: [{ name: 'agentSafe', type: 'address' }],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    name: 'revokeAgent',
+    inputs: [{ name: 'agentSafe', type: 'address' }],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    name: 'reactivateAgent',
+    inputs: [{ name: 'agentSafe', type: 'address' }],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    name: 'isValidAgent',
+    inputs: [{ name: 'agentSafe', type: 'address' }],
+    outputs: [{ name: 'valid', type: 'bool' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'getAgentRecord',
+    inputs: [{ name: 'agentSafe', type: 'address' }],
+    outputs: [
+      {
+        name: '',
+        type: 'tuple',
+        components: [
+          { name: 'agentSafe', type: 'address' },
+          { name: 'agentEOA', type: 'address' },
+          { name: 'createdAt', type: 'uint64' },
+          { name: 'scopeHash', type: 'bytes32' },
+          { name: 'credentialHash', type: 'bytes32' },
+          { name: 'validUntil', type: 'uint64' },
+          { name: 'status', type: 'uint8' },
+        ],
+      },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
     name: 'getAgentSafes',
     inputs: [{ name: 'operatorSafe', type: 'address' }],
     outputs: [
@@ -35,6 +99,10 @@ export const NexoidModuleABI = [
           { name: 'agentSafe', type: 'address' },
           { name: 'agentEOA', type: 'address' },
           { name: 'createdAt', type: 'uint64' },
+          { name: 'scopeHash', type: 'bytes32' },
+          { name: 'credentialHash', type: 'bytes32' },
+          { name: 'validUntil', type: 'uint64' },
+          { name: 'status', type: 'uint8' },
         ],
       },
     ],
@@ -76,6 +144,26 @@ export const NexoidModuleABI = [
     inputs: [
       { name: 'operatorSafe', type: 'address', indexed: true },
       { name: 'agentSafe', type: 'address', indexed: true },
+    ],
+  },
+  {
+    type: 'event',
+    name: 'AgentScopeUpdated',
+    inputs: [
+      { name: 'operatorSafe', type: 'address', indexed: true },
+      { name: 'agentSafe', type: 'address', indexed: true },
+      { name: 'scopeHash', type: 'bytes32', indexed: false },
+      { name: 'credentialHash', type: 'bytes32', indexed: false },
+      { name: 'validUntil', type: 'uint64', indexed: false },
+    ],
+  },
+  {
+    type: 'event',
+    name: 'AgentStatusChanged',
+    inputs: [
+      { name: 'operatorSafe', type: 'address', indexed: true },
+      { name: 'agentSafe', type: 'address', indexed: true },
+      { name: 'newStatus', type: 'uint8', indexed: false },
     ],
   },
 ] as const;
@@ -230,124 +318,6 @@ export const IdentityRegistryABI = [
     inputs: [
       { name: 'oldAdmin', type: 'address', indexed: true },
       { name: 'newAdmin', type: 'address', indexed: true },
-    ],
-  },
-] as const;
-
-export const DelegationRegistryABI = [
-  {
-    type: 'constructor',
-    inputs: [{ name: '_identityRegistry', type: 'address' }],
-    stateMutability: 'nonpayable',
-  },
-  {
-    type: 'function',
-    name: 'delegateWithScope',
-    inputs: [
-      { name: 'subject', type: 'address' },
-      { name: 'credentialHash', type: 'bytes32' },
-      { name: 'scopeHash', type: 'bytes32' },
-      { name: 'validUntil', type: 'uint64' },
-      { name: 'parentDelegationId', type: 'uint256' },
-      { name: 'delegationDepth', type: 'uint8' },
-    ],
-    outputs: [{ name: 'delegationId', type: 'uint256' }],
-    stateMutability: 'nonpayable',
-  },
-  {
-    type: 'function',
-    name: 'revokeDelegation',
-    inputs: [{ name: 'delegationId', type: 'uint256' }],
-    outputs: [],
-    stateMutability: 'nonpayable',
-  },
-  {
-    type: 'function',
-    name: 'suspendDelegation',
-    inputs: [{ name: 'delegationId', type: 'uint256' }],
-    outputs: [],
-    stateMutability: 'nonpayable',
-  },
-  {
-    type: 'function',
-    name: 'reactivateDelegation',
-    inputs: [{ name: 'delegationId', type: 'uint256' }],
-    outputs: [],
-    stateMutability: 'nonpayable',
-  },
-  {
-    type: 'function',
-    name: 'isValidDelegation',
-    inputs: [{ name: 'delegationId', type: 'uint256' }],
-    outputs: [
-      { name: 'valid', type: 'bool' },
-      { name: 'depth', type: 'uint8' },
-    ],
-    stateMutability: 'view',
-  },
-  {
-    type: 'function',
-    name: 'getDelegation',
-    inputs: [{ name: 'delegationId', type: 'uint256' }],
-    outputs: [
-      {
-        name: '',
-        type: 'tuple',
-        components: [
-          { name: 'issuer', type: 'address' },
-          { name: 'subject', type: 'address' },
-          { name: 'credentialHash', type: 'bytes32' },
-          { name: 'scopeHash', type: 'bytes32' },
-          { name: 'validFrom', type: 'uint64' },
-          { name: 'validUntil', type: 'uint64' },
-          { name: 'parentDelegationId', type: 'uint256' },
-          { name: 'delegationDepth', type: 'uint8' },
-          { name: 'status', type: 'uint8' },
-        ],
-      },
-    ],
-    stateMutability: 'view',
-  },
-  {
-    type: 'function',
-    name: 'nextDelegationId',
-    inputs: [],
-    outputs: [{ name: '', type: 'uint256' }],
-    stateMutability: 'view',
-  },
-  {
-    type: 'function',
-    name: 'identityRegistry',
-    inputs: [],
-    outputs: [{ name: '', type: 'address' }],
-    stateMutability: 'view',
-  },
-  {
-    type: 'event',
-    name: 'DelegationCreated',
-    inputs: [
-      { name: 'delegationId', type: 'uint256', indexed: true },
-      { name: 'issuer', type: 'address', indexed: true },
-      { name: 'subject', type: 'address', indexed: true },
-      { name: 'scopeHash', type: 'bytes32', indexed: false },
-      { name: 'delegationDepth', type: 'uint8', indexed: false },
-      { name: 'validUntil', type: 'uint64', indexed: false },
-    ],
-  },
-  {
-    type: 'event',
-    name: 'DelegationRevoked',
-    inputs: [
-      { name: 'delegationId', type: 'uint256', indexed: true },
-      { name: 'revokedBy', type: 'address', indexed: true },
-    ],
-  },
-  {
-    type: 'event',
-    name: 'DelegationSuspended',
-    inputs: [
-      { name: 'delegationId', type: 'uint256', indexed: true },
-      { name: 'suspendedBy', type: 'address', indexed: true },
     ],
   },
 ] as const;

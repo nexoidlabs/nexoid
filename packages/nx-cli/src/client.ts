@@ -33,7 +33,6 @@ export function buildClient(profileName?: string, dryRun = false): NexoidClient 
   const client = new NexoidClient({
     rpcUrl: profile.rpcUrl,
     registryAddress: profile.registryAddress,
-    delegationRegistryAddress: profile.delegationRegistryAddress,
     tokenAddress: profile.tokenAddress,
     nexoidModuleAddress: profile.nexoidModuleAddress,
     privateKey,
@@ -52,8 +51,10 @@ function createDryRunProxy(client: NexoidClient): NexoidClient {
   const writeMethods = new Set([
     'createAgent',
     'updateIdentityStatus',
-    'delegate',
-    'revoke',
+    'updateAgentScope',
+    'revokeAgent',
+    'suspendAgent',
+    'reactivateAgent',
     'sendUSDT',
     'setAllowance',
     'deploySafe',

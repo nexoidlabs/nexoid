@@ -11,7 +11,7 @@ AI agents can reason and act, but they cannot prove who they are, spend money wi
 | Feature | Description |
 |---------|-------------|
 | **On-chain Identity** | Register operators and agents on the Ethereum IdentityRegistry |
-| **Scoped Delegation** | Create delegation chains with budget limits, max transaction amounts, and depth controls |
+| **Scoped Delegation** | Flat operator→agent delegation with budget limits, max transaction amounts, and expiry |
 | **Safe Smart Wallets** | Operator funds held in Safe{Wallet} with AllowanceModule for per-agent spending limits |
 | **WDK Key Derivation** | BIP-44 HD key derivation (m/44'/60'/0'/0/{index}) — deterministic, recoverable agent keys |
 | **EIP-712 Identity Proof** | Agents generate verifiable cryptographic proofs of identity and delegation |
@@ -31,7 +31,7 @@ Operator (Human)
 
 On-chain:
   IdentityRegistry ← register operators + agents
-  DelegationRegistry ← scoped delegation chains
+  NexoidModule ← agent registry with embedded scope, status, expiry
   AllowanceModule ← per-agent USDT spending limits (EVM-enforced)
 ```
 
@@ -75,7 +75,7 @@ cd apps/nx-verify && pnpm dev     # http://localhost:3200
 ```bash
 # Initialize CLI config
 nxcli init --rpc-url https://ethereum-sepolia-rpc.publicnode.com \
-  --registry 0x... --delegation-registry 0x...
+  --registry 0x... --nexoid-module 0x...
 
 # Register identity + deploy Safe
 nxcli register
@@ -84,7 +84,7 @@ nxcli register
 nxcli agent create --label "Agent Alpha"
 
 # Delegate scope to agent
-nxcli delegate did:nexoid:eth:0x... --budget 100 --max-tx 50
+nxcli delegate 0xAgentSafeAddress --budget 100 --max-tx 50
 
 # Set allowance on Safe
 nxcli set-allowance did:nexoid:eth:0x... 100 --reset 1440
@@ -93,7 +93,7 @@ nxcli set-allowance did:nexoid:eth:0x... 100 --reset 1440
 nxcli send 0xRecipient 10
 
 # Agent: generate identity proof
-nxcli credential prove --delegation 1 --verifier 0x...
+nxcli credential prove --verifier 0x...
 
 # Agent: request additional funds
 nxcli request-funds --amount 500 --reason "API subscription payment"
@@ -130,7 +130,6 @@ Run the setup scripts in order:
 HARDHAT_NETWORK=sepolia tsx scripts/01-deploy-contracts.ts
 tsx scripts/02-register-operator.ts
 tsx scripts/03-create-agents.ts
-tsx scripts/04-setup-delegations.ts
 tsx scripts/05-deploy-safe.ts
 tsx scripts/06-set-allowances.ts
 tsx scripts/07-fund-agents-eth.ts

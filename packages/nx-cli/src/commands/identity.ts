@@ -13,10 +13,9 @@ export function registerIdentityCommands(program: Command): void {
     .description('Initialize CLI config')
     .requiredOption('--rpc-url <url>', 'RPC URL for Ethereum network')
     .requiredOption('--registry <address>', 'IdentityRegistry contract address')
-    .requiredOption('--delegation-registry <address>', 'DelegationRegistry contract address')
     .option('--safe <address>', 'Operator Safe wallet address')
     .option('--token <address>', 'USDT token contract address')
-    .option('--nexoid-module <address>', 'NexoidModule contract address (agent Safe registry)')
+    .requiredOption('--nexoid-module <address>', 'NexoidModule contract address (agent Safe registry)')
     .option('--mode <mode>', 'Profile mode: operator or agent', 'operator')
     .option('--profile <name>', 'Profile name', 'default')
     .option('--seed', 'Use WDK seed phrase from NEXOID_SEED_PHRASE env var to derive operator key')
@@ -29,10 +28,9 @@ export function registerIdentityCommands(program: Command): void {
         mode,
         rpcUrl: opts.rpcUrl,
         registryAddress: opts.registry as `0x${string}`,
-        delegationRegistryAddress: opts.delegationRegistry as `0x${string}`,
         safeAddress: opts.safe as `0x${string}` | undefined,
         tokenAddress: opts.token as `0x${string}` | undefined,
-        nexoidModuleAddress: opts.nexoidModule as `0x${string}` | undefined,
+        nexoidModuleAddress: opts.nexoidModule as `0x${string}`,
         nextAgentIndex: 1,
       };
 
@@ -216,7 +214,7 @@ export function registerIdentityCommands(program: Command): void {
         mode: profile.mode,
         rpcUrl: profile.rpcUrl,
         registryAddress: profile.registryAddress,
-        delegationRegistryAddress: profile.delegationRegistryAddress,
+        nexoidModuleAddress: profile.nexoidModuleAddress,
         safeAddress: profile.safeAddress ?? '(not set)',
         tokenAddress: profile.tokenAddress ?? '(default)',
         privateKey: process.env['NEXOID_PRIVATE_KEY'] ? '***SET***' : '(not set)',
@@ -304,7 +302,6 @@ export function registerIdentityCommands(program: Command): void {
                 mode: 'agent',
                 rpcUrl: profile.rpcUrl,
                 registryAddress: profile.registryAddress,
-                delegationRegistryAddress: profile.delegationRegistryAddress,
                 safeAddress: output.agentSafeAddress ?? profile.safeAddress,
                 tokenAddress: profile.tokenAddress,
                 nexoidModuleAddress: profile.nexoidModuleAddress,

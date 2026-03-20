@@ -8,11 +8,10 @@ export interface NxCliProfile {
   mode: CliMode;
   rpcUrl: string;
   registryAddress: `0x${string}`;
-  delegationRegistryAddress: `0x${string}`;
   safeAddress?: `0x${string}`;
   tokenAddress?: `0x${string}`;
   /** NexoidModule contract address (for agent Safe registry). */
-  nexoidModuleAddress?: `0x${string}`;
+  nexoidModuleAddress: `0x${string}`;
   /** Next BIP-44 index for WDK agent derivation (starts at 1). */
   nextAgentIndex?: number;
 }
@@ -67,7 +66,6 @@ export function loadConfig(profileName?: string): NxCliProfile {
     mode: (process.env['NEXOID_MODE'] as CliMode | undefined) ?? profile.mode,
     rpcUrl: process.env['NEXOID_RPC_URL'] ?? profile.rpcUrl,
     registryAddress: (process.env['NEXOID_REGISTRY'] as `0x${string}` | undefined) ?? profile.registryAddress,
-    delegationRegistryAddress: (process.env['NEXOID_DELEGATION_REGISTRY'] as `0x${string}` | undefined) ?? profile.delegationRegistryAddress,
     safeAddress: (process.env['NEXOID_SAFE'] as `0x${string}` | undefined) ?? profile.safeAddress,
     tokenAddress: (process.env['NEXOID_TOKEN'] as `0x${string}` | undefined) ?? profile.tokenAddress,
     nexoidModuleAddress: (process.env['NEXOID_MODULE'] as `0x${string}` | undefined) ?? profile.nexoidModuleAddress,

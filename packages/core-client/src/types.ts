@@ -7,13 +7,13 @@ import type {
   EntityType,
   AgentScope,
   IdentityRecord,
-  DelegationRecord,
+  AgentRecord,
   Balance,
   EmailCredential,
 } from '@nexoid/nx-core';
 
 // Re-export for convenience
-export type { NexoidDID, AgentScope, IdentityRecord, DelegationRecord, Balance, EmailCredential };
+export type { NexoidDID, AgentScope, IdentityRecord, AgentRecord, Balance, EmailCredential };
 export { EntityType, EntityStatus, DelegationStatus } from '@nexoid/nx-core';
 
 /**
@@ -24,14 +24,12 @@ export interface NexoidClientConfig {
   rpcUrl: string;
   /** IdentityRegistry contract address */
   registryAddress: `0x${string}`;
-  /** DelegationRegistry contract address */
-  delegationRegistryAddress: `0x${string}`;
   /** USDT contract address (defaults to Ethereum Mainnet/Sepolia USDT) */
   tokenAddress?: `0x${string}`;
   /** AllowanceModule singleton address (defaults to Ethereum Mainnet) */
   allowanceModuleAddress?: `0x${string}`;
-  /** NexoidModule contract address (for agent Safe registry) */
-  nexoidModuleAddress?: `0x${string}`;
+  /** NexoidModule contract address (required for agent scope operations) */
+  nexoidModuleAddress: `0x${string}`;
   /** Private key for signing transactions (operator) */
   privateKey?: `0x${string}`;
 }
@@ -60,35 +58,27 @@ export interface AgentIdentity {
 }
 
 /**
- * Options for delegating scope to an agent.
+ * Options for updating an agent's scope via NexoidModule.
  */
-export interface DelegateOpts {
-  agentDid: NexoidDID;
+export interface UpdateScopeOpts {
+  agentSafe: `0x${string}`;
   scope: AgentScope;
   validUntil: Date;
-  parentDelegationId?: string;
 }
 
 /**
- * Result of delegation.
+ * Result of scope update.
  */
-export interface DelegationResult {
-  delegationId: string;
+export interface ScopeUpdateResult {
   txHash: `0x${string}`;
   scope: AgentScope;
 }
 
 /**
- * Result of delegation validation.
+ * Result of agent validation.
  */
 export interface ValidationResult {
   valid: boolean;
-  depth: number;
-  chain?: Array<{
-    delegationId: string;
-    issuer: NexoidDID;
-    subject: NexoidDID;
-  }>;
 }
 
 /**
