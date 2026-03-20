@@ -1,6 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
+import Link from "next/link";
 
 const NAV_ITEMS = [
   { label: "Overview", section: "Main" },
@@ -56,11 +57,7 @@ export function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="sidebar-logo">
-        <img src="/logo.svg" alt="Nexoid" />
-        <div className="sidebar-logo-text">
-          <span className="name">Nexoid</span>
-          <span className="tag">Identity Protocol</span>
-        </div>
+        <img src="/nexoid-labs-logo.png" alt="Nexoid Labs" className="sidebar-logo-wordmark" />
       </div>
 
       <nav className="sidebar-nav">
@@ -77,16 +74,16 @@ export function Sidebar() {
               ? pathname === "/"
               : pathname.startsWith(item.href!);
           return (
-            <a
+            <Link
               key={item.href}
-              href={item.href}
+              href={item.href!}
               className={`sidebar-link ${isActive ? "active" : ""}`}
             >
               <span className="sidebar-icon">
                 {ICONS[item.icon!]}
               </span>
               <span>{item.label}</span>
-            </a>
+            </Link>
           );
         })}
       </nav>

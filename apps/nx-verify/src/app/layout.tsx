@@ -27,14 +27,15 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
+        <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
       <body>
         <div className="container">
           <header className="header">
-            <div>
-              <h1>Nexoid Verify</h1>
-              <div className="subtitle">Identity Explorer & Proof Verifier</div>
+            <div className="header-brand">
+              <img src="/nexoid-labs-logo.png" alt="Nexoid Labs" className="header-logo" />
+              <div className="subtitle">Verify</div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
               <ThemeToggle />
