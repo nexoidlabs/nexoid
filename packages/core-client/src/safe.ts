@@ -24,6 +24,7 @@ async function getSafe() {
 import type { PublicClient, WalletClient } from 'viem';
 import {
   ALLOWANCE_MODULE,
+  NexoidModuleABI,
   encodeAddDelegate,
   encodeSetAllowance,
   encodeRemoveDelegate,
@@ -139,6 +140,147 @@ export async function enableAllowanceModule(
   const signedTx = await kit.signTransaction(enableTx);
   const result = await kit.executeTransaction(signedTx);
   return (result.hash ?? '0x0') as `0x${string}`;
+}
+
+// ─── Agent Safe Deployment ──────────────────────────────────
+
+export interface AgentSafeDeployResult {
+  agentSafeAddress: `0x${string}`;
+  txHash: `0x${string}`;
+}
+
+/**
+ * Deploy a new Safe wallet for an agent (1-of-1 with operator EOA as owner),
+ * enable AllowanceModule on it, add agent EOA as delegate, and register
+ * with NexoidModule.
+ *
+ * @param config - Operator's SafeConfig (operator signs everything)
+ * @param operatorSafeAddress - Operator's Safe address (for NexoidModule registration)
+ * @param agentEOA - Agent's signing EOA address
+ * @param nexoidModuleAddress - NexoidModule contract address
+ */
+export async function deployAgentSafe(
+  config: SafeConfig,
+  operatorSafeAddress: `0x${string}`,
+  agentEOA: `0x${string}`,
+  nexoidModuleAddress: `0x${string}`
+): Promise<AgentSafeDeployResult> {
+  const ownerAddress = config.walletClient.account!.address;
+
+  // 1. Deploy 1-of-1 Safe with operator's EOA as sole owner
+  const protocolKit = await (await getSafe()).init({
+    provider: config.rpcUrl,
+    signer: config.privateKey,
+    predictedSafe: {
+      safeAccountConfig: {
+        owners: [ownerAddress],
+        threshold: 1,
+      },
+    },
+  });
+
+  const agentSafeAddress = (await protocolKit.getAddress()) as `0x${string}`;
+
+  const deployTx = await protocolKit.createSafeDeploymentTransaction();
+  const txHash = await config.walletClient.sendTransaction({
+    to: deployTx.to as `0x${string}`,
+    value: BigInt(deployTx.value),
+    data: deployTx.data as `0x${string}`,
+    chain: config.walletClient.chain,
+    account: config.walletClient.account!,
+  });
+  await config.publicClient.waitForTransactionReceipt({ hash: txHash });
+
+  // 2. Reconnect to deployed agent Safe and enable AllowanceModule
+  const deployedKit = await protocolKit.connect({ safeAddress: agentSafeAddress });
+  try {
+    const enableModuleTx = await deployedKit.createEnableModuleTx(
+      config.allowanceModuleAddress
+    );
+    const signedTx = await deployedKit.signTransaction(enableModuleTx);
+    await deployedKit.executeTransaction(signedTx);
+  } catch (err) {
+    console.error('Warning: Failed to enable AllowanceModule on agent Safe:', err);
+  }
+
+  // 3. Add agent EOA as delegate on agent's Safe AllowanceModule
+  try {
+    const addDelegateTx = await deployedKit.createTransaction({
+      transactions: [
+        {
+          to: config.allowanceModuleAddress,
+          value: '0',
+          data: encodeAddDelegate(agentEOA),
+        },
+      ],
+    });
+    const signedDelegateTx = await deployedKit.signTransaction(addDelegateTx);
+    await deployedKit.executeTransaction(signedDelegateTx);
+  } catch (err) {
+    console.error('Warning: Failed to add agent as delegate on agent Safe:', err);
+  }
+
+  // 4. Register agent Safe with NexoidModule (via operator Safe tx)
+  try {
+    const operatorKit = await (await getSafe()).init({
+      provider: config.rpcUrl,
+      signer: config.privateKey,
+      safeAddress: operatorSafeAddress,
+    });
+
+    const { encodeFunctionData } = await import('viem');
+    const registerData = encodeFunctionData({
+      abi: NexoidModuleABI,
+      functionName: 'registerAgentSafe',
+      args: [agentSafeAddress, agentEOA],
+    });
+
+    const registerTx = await operatorKit.createTransaction({
+      transactions: [
+        {
+          to: nexoidModuleAddress,
+          value: '0',
+          data: registerData,
+        },
+      ],
+    });
+    const signedRegisterTx = await operatorKit.signTransaction(registerTx);
+    await operatorKit.executeTransaction(signedRegisterTx);
+  } catch (err) {
+    console.error('Warning: Failed to register agent Safe with NexoidModule:', err);
+  }
+
+  return { agentSafeAddress, txHash };
+}
+
+/**
+ * Query NexoidModule for all agent Safes belonging to an operator.
+ */
+export async function getAgentSafes(
+  publicClient: PublicClient,
+  nexoidModuleAddress: `0x${string}`,
+  operatorSafeAddress: `0x${string}`
+): Promise<Array<{ agentSafe: `0x${string}`; agentEOA: `0x${string}`; createdAt: bigint }>> {
+  const result = await publicClient.readContract({
+    address: nexoidModuleAddress,
+    abi: NexoidModuleABI,
+    functionName: 'getAgentSafes',
+    args: [operatorSafeAddress],
+  });
+
+  return (result as Array<{ agentSafe: `0x${string}`; agentEOA: `0x${string}`; createdAt: bigint }>);
+}
+
+/**
+ * Send USDT from operator's Safe to an agent's Safe (fund the agent).
+ */
+export async function fundAgentSafe(
+  config: SafeConfig,
+  operatorSafeAddress: `0x${string}`,
+  agentSafeAddress: `0x${string}`,
+  amount: string
+): Promise<`0x${string}`> {
+  return sendFromSafe(config, operatorSafeAddress, agentSafeAddress, amount);
 }
 
 // ─── Operator Actions (executed through Safe) ───────────────

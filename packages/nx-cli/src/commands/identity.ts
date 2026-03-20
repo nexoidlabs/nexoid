@@ -16,6 +16,7 @@ export function registerIdentityCommands(program: Command): void {
     .requiredOption('--delegation-registry <address>', 'DelegationRegistry contract address')
     .option('--safe <address>', 'Operator Safe wallet address')
     .option('--token <address>', 'USDT token contract address')
+    .option('--nexoid-module <address>', 'NexoidModule contract address (agent Safe registry)')
     .option('--mode <mode>', 'Profile mode: operator or agent', 'operator')
     .option('--profile <name>', 'Profile name', 'default')
     .option('--seed', 'Use WDK seed phrase from NEXOID_SEED_PHRASE env var to derive operator key')
@@ -31,6 +32,7 @@ export function registerIdentityCommands(program: Command): void {
         delegationRegistryAddress: opts.delegationRegistry as `0x${string}`,
         safeAddress: opts.safe as `0x${string}` | undefined,
         tokenAddress: opts.token as `0x${string}` | undefined,
+        nexoidModuleAddress: opts.nexoidModule as `0x${string}` | undefined,
         nextAgentIndex: 1,
       };
 
@@ -260,19 +262,40 @@ export function registerIdentityCommands(program: Command): void {
 
       const result = await client.createAgent(createOpts);
 
-      kv({
+      const output: Record<string, string | undefined> = {
         did: result.did,
         address: result.address,
         apiKey: result.apiKey,
         txHash: result.txHash,
-      });
+      };
+
+      // Deploy agent Safe if operator has a Safe and NexoidModule configured
+      const profile = loadConfig(globalOpts.profile);
+      if (profile.safeAddress && profile.nexoidModuleAddress) {
+        if (!isJsonMode()) warn('Deploying agent Safe wallet...');
+        try {
+          const agentSafeResult = await client.deployAgentSafe(
+            result.address,
+            profile.safeAddress
+          );
+          output.agentSafeAddress = agentSafeResult.agentSafeAddress;
+          output.agentSafeTxHash = agentSafeResult.txHash;
+
+          if (!isJsonMode()) warn(`Agent Safe deployed at ${agentSafeResult.agentSafeAddress}`);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (!isJsonMode()) warn(`Agent Safe deployment failed: ${msg}`);
+          output.agentSafeError = msg;
+        }
+      }
+
+      kv(output);
 
       // Output ready-to-use agent config
       if (!isJsonMode()) {
         success('Agent created. Save the apiKey — it is shown only once.');
 
         try {
-          const profile = loadConfig(globalOpts.profile);
           const agentConfig = {
             version: '1',
             defaultProfile: 'default',
@@ -282,8 +305,9 @@ export function registerIdentityCommands(program: Command): void {
                 rpcUrl: profile.rpcUrl,
                 registryAddress: profile.registryAddress,
                 delegationRegistryAddress: profile.delegationRegistryAddress,
-                safeAddress: profile.safeAddress,
+                safeAddress: output.agentSafeAddress ?? profile.safeAddress,
                 tokenAddress: profile.tokenAddress,
+                nexoidModuleAddress: profile.nexoidModuleAddress,
               },
             },
           };

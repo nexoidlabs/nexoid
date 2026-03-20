@@ -285,6 +285,41 @@ export const ERC20_ABI = [
 
 export const ALLOWANCE_MODULE_ADDRESS = "0xCFbFaC74C26F8647cBDb8c5caf80BB5b32E43134" as Address;
 
+// NexoidModule ABI for querying agent Safes
+export const NEXOID_MODULE_ABI = [
+  {
+    type: "function",
+    name: "getAgentSafes",
+    inputs: [{ name: "operatorSafe", type: "address" }],
+    outputs: [
+      {
+        name: "",
+        type: "tuple[]",
+        components: [
+          { name: "agentSafe", type: "address" },
+          { name: "agentEOA", type: "address" },
+          { name: "createdAt", type: "uint64" },
+        ],
+      },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "getOperator",
+    inputs: [{ name: "agentSafe", type: "address" }],
+    outputs: [{ name: "", type: "address" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "agentCount",
+    inputs: [{ name: "operatorSafe", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+  },
+] as const;
+
 export const USDT_ADDRESSES: Record<string, Address> = {
   ethereum: "0xdAC17F958D2ee523a2206206994597C13D831ec7",
   sepolia: "0xaA8E23Fb1079EA71e0a56F48a2aA51851D8433D0",
@@ -328,6 +363,10 @@ export function getRegistryAddress(): Address {
 export function getModuleAddress(): Address {
   return (process.env.NEXT_PUBLIC_MODULE_ADDRESS ??
     "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512") as Address;
+}
+
+export function getNexoidModuleAddress(): Address | undefined {
+  return process.env.NEXT_PUBLIC_NEXOID_MODULE_ADDRESS as Address | undefined;
 }
 
 export function getPublicClient(): PublicClient {

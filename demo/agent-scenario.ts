@@ -43,18 +43,22 @@ async function main() {
   const agentIndex = 1;
   const agent = deriveAgent(config.operator.seedPhrase, agentIndex);
   const agentDid = addressToDID(agent.address);
-  const safeAddress = config.operator.safeAddress as `0x${string}`;
+  const operatorSafeAddress = config.operator.safeAddress as `0x${string}`;
+  // Agent's own Safe (new architecture)
+  const agentSafeAddress = (config.agents[0]?.safeAddress ?? operatorSafeAddress) as `0x${string}`;
 
   const client = new NexoidClient({
     rpcUrl: config.rpcUrl,
     registryAddress: config.contracts.identityRegistry,
     delegationRegistryAddress: config.contracts.delegationRegistry,
+    nexoidModuleAddress: config.contracts.nexoidModule,
     privateKey: agent.privateKey,
   });
 
   console.log("Nexoid Agent Demo Scenario");
   console.log("Agent:", agentDid);
-  console.log("Safe:", safeAddress);
+  console.log("Operator Safe:", operatorSafeAddress);
+  console.log("Agent Safe:", agentSafeAddress);
 
   // Step 1: Confirm identity
   step(1, "Agent confirms identity");
@@ -73,18 +77,18 @@ async function main() {
   console.log("Depth:", validation.depth);
   await pause();
 
-  // Step 3: Check allowance
-  step(3, "Agent checks USDT allowance");
-  const allowance = await client.getAllowance(agentDid, safeAddress);
+  // Step 3: Check allowance (on agent's own Safe)
+  step(3, "Agent checks USDT allowance on own Safe");
+  const allowance = await client.getAllowance(agentDid, agentSafeAddress);
   console.log("Remaining allowance:", allowance, "USDT");
   await pause();
 
-  // Step 4: Send USDT within limits
-  step(4, "Agent sends 10 USDT");
+  // Step 4: Send USDT within limits (from agent's own Safe)
+  step(4, "Agent sends 10 USDT from own Safe");
   try {
     const result = await client.sendUSDT(
       { to: DEMO_RECIPIENT, amount: "10" },
-      safeAddress,
+      agentSafeAddress,
       "agent"
     );
     console.log("tx:", result.txHash);
@@ -100,7 +104,7 @@ async function main() {
   try {
     await client.sendUSDT(
       { to: DEMO_RECIPIENT, amount: "99999" },
-      safeAddress,
+      agentSafeAddress,
       "agent"
     );
     console.log("ERROR: Should have reverted!");
@@ -135,7 +139,7 @@ async function main() {
 
   // Step 8: After approval, verify increased allowance
   step(8, "Agent checks updated allowance after approval");
-  const newAllowance = await client.getAllowance(agentDid, safeAddress);
+  const newAllowance = await client.getAllowance(agentDid, agentSafeAddress);
   console.log("Updated allowance:", newAllowance, "USDT");
   await pause();
 

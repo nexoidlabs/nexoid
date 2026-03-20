@@ -28,7 +28,7 @@ async function main() {
   console.log("");
 
   // 1. Deploy IdentityRegistry
-  console.log("[1/2] Deploying IdentityRegistry...");
+  console.log("[1/3] Deploying IdentityRegistry...");
   const IdentityRegistry = await hre.ethers.getContractFactory("IdentityRegistry");
   const registry = await IdentityRegistry.deploy();
   await registry.waitForDeployment();
@@ -36,12 +36,20 @@ async function main() {
   console.log("      IdentityRegistry:", registryAddress);
 
   // 2. Deploy DelegationRegistry (linked to registry)
-  console.log("[2/2] Deploying DelegationRegistry...");
+  console.log("[2/3] Deploying DelegationRegistry...");
   const DelegationRegistry = await hre.ethers.getContractFactory("DelegationRegistry");
   const delegation = await DelegationRegistry.deploy(registryAddress);
   await delegation.waitForDeployment();
   const delegationAddress = await delegation.getAddress();
   console.log("      DelegationRegistry:", delegationAddress);
+
+  // 3. Deploy NexoidModule
+  console.log("[3/3] Deploying NexoidModule...");
+  const NexoidModule = await hre.ethers.getContractFactory("NexoidModule");
+  const nexoidModule = await NexoidModule.deploy();
+  await nexoidModule.waitForDeployment();
+  const nexoidModuleAddress = await nexoidModule.getAddress();
+  console.log("      NexoidModule:", nexoidModuleAddress);
 
   // Summary
   const deploymentManifest = {
@@ -52,6 +60,7 @@ async function main() {
     contracts: {
       IdentityRegistry: registryAddress,
       DelegationRegistry: delegationAddress,
+      NexoidModule: nexoidModuleAddress,
     },
   };
 
@@ -61,6 +70,7 @@ async function main() {
   console.log("\n=== Add to .env ===");
   console.log(`IDENTITY_REGISTRY_ADDRESS=${registryAddress}`);
   console.log(`DELEGATION_REGISTRY_ADDRESS=${delegationAddress}`);
+  console.log(`NEXOID_MODULE_ADDRESS=${nexoidModuleAddress}`);
 
   return deploymentManifest;
 }

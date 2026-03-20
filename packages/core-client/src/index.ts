@@ -26,10 +26,11 @@ export type {
 export { EntityType, EntityStatus, DelegationStatus } from './types.js';
 
 // Safe wallet operations
-export type { SafeConfig, SafeDeployResult } from './safe.js';
+export type { SafeConfig, SafeDeployResult, AgentSafeDeployResult } from './safe.js';
+export { getAgentSafes, fundAgentSafe } from './safe.js';
 
 // Re-export Safe constants from nx-core
-export { ALLOWANCE_MODULE, ENTRYPOINT } from '@nexoid/nx-core';
+export { ALLOWANCE_MODULE, ENTRYPOINT, NexoidModuleABI } from '@nexoid/nx-core';
 export type { TokenAllowance } from '@nexoid/nx-core';
 
 // Credential utilities

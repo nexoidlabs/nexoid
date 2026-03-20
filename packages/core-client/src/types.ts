@@ -30,6 +30,8 @@ export interface NexoidClientConfig {
   tokenAddress?: `0x${string}`;
   /** AllowanceModule singleton address (defaults to Ethereum Mainnet) */
   allowanceModuleAddress?: `0x${string}`;
+  /** NexoidModule contract address (for agent Safe registry) */
+  nexoidModuleAddress?: `0x${string}`;
   /** Private key for signing transactions (operator) */
   privateKey?: `0x${string}`;
 }

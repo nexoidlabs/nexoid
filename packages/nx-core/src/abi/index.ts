@@ -5,6 +5,81 @@
 
 export { AllowanceModuleABI } from './allowance-module.js';
 
+export const NexoidModuleABI = [
+  {
+    type: 'function',
+    name: 'registerAgentSafe',
+    inputs: [
+      { name: 'agentSafe', type: 'address' },
+      { name: 'agentEOA', type: 'address' },
+    ],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    name: 'removeAgentSafe',
+    inputs: [{ name: 'agentSafe', type: 'address' }],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    name: 'getAgentSafes',
+    inputs: [{ name: 'operatorSafe', type: 'address' }],
+    outputs: [
+      {
+        name: '',
+        type: 'tuple[]',
+        components: [
+          { name: 'agentSafe', type: 'address' },
+          { name: 'agentEOA', type: 'address' },
+          { name: 'createdAt', type: 'uint64' },
+        ],
+      },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'getOperator',
+    inputs: [{ name: 'agentSafe', type: 'address' }],
+    outputs: [{ name: '', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'operatorOf',
+    inputs: [{ name: 'agentSafe', type: 'address' }],
+    outputs: [{ name: '', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'agentCount',
+    inputs: [{ name: 'operatorSafe', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'event',
+    name: 'AgentSafeRegistered',
+    inputs: [
+      { name: 'operatorSafe', type: 'address', indexed: true },
+      { name: 'agentSafe', type: 'address', indexed: true },
+      { name: 'agentEOA', type: 'address', indexed: false },
+    ],
+  },
+  {
+    type: 'event',
+    name: 'AgentSafeRemoved',
+    inputs: [
+      { name: 'operatorSafe', type: 'address', indexed: true },
+      { name: 'agentSafe', type: 'address', indexed: true },
+    ],
+  },
+] as const;
+
 export const IdentityRegistryABI = [
   {
     type: 'function',

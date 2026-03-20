@@ -11,6 +11,8 @@ export interface NxCliProfile {
   delegationRegistryAddress: `0x${string}`;
   safeAddress?: `0x${string}`;
   tokenAddress?: `0x${string}`;
+  /** NexoidModule contract address (for agent Safe registry). */
+  nexoidModuleAddress?: `0x${string}`;
   /** Next BIP-44 index for WDK agent derivation (starts at 1). */
   nextAgentIndex?: number;
 }
@@ -68,6 +70,7 @@ export function loadConfig(profileName?: string): NxCliProfile {
     delegationRegistryAddress: (process.env['NEXOID_DELEGATION_REGISTRY'] as `0x${string}` | undefined) ?? profile.delegationRegistryAddress,
     safeAddress: (process.env['NEXOID_SAFE'] as `0x${string}` | undefined) ?? profile.safeAddress,
     tokenAddress: (process.env['NEXOID_TOKEN'] as `0x${string}` | undefined) ?? profile.tokenAddress,
+    nexoidModuleAddress: (process.env['NEXOID_MODULE'] as `0x${string}` | undefined) ?? profile.nexoidModuleAddress,
     nextAgentIndex: profile.nextAgentIndex,
   };
 }

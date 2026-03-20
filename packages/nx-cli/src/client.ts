@@ -35,6 +35,7 @@ export function buildClient(profileName?: string, dryRun = false): NexoidClient 
     registryAddress: profile.registryAddress,
     delegationRegistryAddress: profile.delegationRegistryAddress,
     tokenAddress: profile.tokenAddress,
+    nexoidModuleAddress: profile.nexoidModuleAddress,
     privateKey,
   });
 

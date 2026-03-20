@@ -1561,4 +1561,161 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
       expect(hashNonce0).to.not.equal(hashNonce1);
     });
   });
+
+  // ═══════════════════════════════════════════════════════════════
+  // PHASE 11: NexoidModule — Agent Safe Registry
+  // ═══════════════════════════════════════════════════════════════
+
+  describe("Phase 11: NexoidModule", function () {
+    async function deployWithNexoidModuleFixture() {
+      const fixture = await loadFixture(deployFullSystemFixture);
+
+      const NexoidModule = await hre.ethers.getContractFactory("NexoidModule");
+      const nexoidModule = await NexoidModule.connect(fixture.admin).deploy();
+
+      return { ...fixture, nexoidModule };
+    }
+
+    it("should deploy NexoidModule successfully", async function () {
+      const { nexoidModule } = await loadFixture(deployWithNexoidModuleFixture);
+      expect(await nexoidModule.getAddress()).to.be.properAddress;
+    });
+
+    it("should register an agent Safe under an operator", async function () {
+      const { nexoidModule, operator, agent1 } =
+        await loadFixture(deployWithNexoidModuleFixture);
+
+      // operator.address acts as the operator Safe in tests
+      const agentSafeAddr = agent1.address; // simulated agent Safe
+
+      await expect(
+        nexoidModule.connect(operator).registerAgentSafe(agentSafeAddr, agent1.address)
+      )
+        .to.emit(nexoidModule, "AgentSafeRegistered")
+        .withArgs(operator.address, agentSafeAddr, agent1.address);
+
+      expect(await nexoidModule.agentCount(operator.address)).to.equal(1);
+      expect(await nexoidModule.getOperator(agentSafeAddr)).to.equal(operator.address);
+    });
+
+    it("should register multiple agent Safes", async function () {
+      const { nexoidModule, operator, agent1, agent2 } =
+        await loadFixture(deployWithNexoidModuleFixture);
+
+      await nexoidModule.connect(operator).registerAgentSafe(agent1.address, agent1.address);
+      await nexoidModule.connect(operator).registerAgentSafe(agent2.address, agent2.address);
+
+      expect(await nexoidModule.agentCount(operator.address)).to.equal(2);
+
+      const agents = await nexoidModule.getAgentSafes(operator.address);
+      expect(agents.length).to.equal(2);
+      expect(agents[0].agentSafe).to.equal(agent1.address);
+      expect(agents[1].agentSafe).to.equal(agent2.address);
+    });
+
+    it("should return correct reverse lookup (getOperator)", async function () {
+      const { nexoidModule, operator, agent1 } =
+        await loadFixture(deployWithNexoidModuleFixture);
+
+      await nexoidModule.connect(operator).registerAgentSafe(agent1.address, agent1.address);
+
+      expect(await nexoidModule.getOperator(agent1.address)).to.equal(operator.address);
+      expect(await nexoidModule.operatorOf(agent1.address)).to.equal(operator.address);
+    });
+
+    it("should reject duplicate agent Safe registration", async function () {
+      const { nexoidModule, operator, agent1 } =
+        await loadFixture(deployWithNexoidModuleFixture);
+
+      await nexoidModule.connect(operator).registerAgentSafe(agent1.address, agent1.address);
+
+      await expect(
+        nexoidModule.connect(operator).registerAgentSafe(agent1.address, agent1.address)
+      ).to.be.revertedWith("Agent Safe already registered");
+    });
+
+    it("should reject registration with zero addresses", async function () {
+      const { nexoidModule, operator, agent1 } =
+        await loadFixture(deployWithNexoidModuleFixture);
+
+      await expect(
+        nexoidModule.connect(operator).registerAgentSafe(hre.ethers.ZeroAddress, agent1.address)
+      ).to.be.revertedWith("Invalid agent Safe");
+
+      await expect(
+        nexoidModule.connect(operator).registerAgentSafe(agent1.address, hre.ethers.ZeroAddress)
+      ).to.be.revertedWith("Invalid agent EOA");
+    });
+
+    it("should remove an agent Safe", async function () {
+      const { nexoidModule, operator, agent1, agent2 } =
+        await loadFixture(deployWithNexoidModuleFixture);
+
+      await nexoidModule.connect(operator).registerAgentSafe(agent1.address, agent1.address);
+      await nexoidModule.connect(operator).registerAgentSafe(agent2.address, agent2.address);
+
+      await expect(
+        nexoidModule.connect(operator).removeAgentSafe(agent1.address)
+      )
+        .to.emit(nexoidModule, "AgentSafeRemoved")
+        .withArgs(operator.address, agent1.address);
+
+      expect(await nexoidModule.agentCount(operator.address)).to.equal(1);
+      expect(await nexoidModule.getOperator(agent1.address)).to.equal(hre.ethers.ZeroAddress);
+
+      // Remaining agent is agent2
+      const agents = await nexoidModule.getAgentSafes(operator.address);
+      expect(agents.length).to.equal(1);
+      expect(agents[0].agentSafe).to.equal(agent2.address);
+    });
+
+    it("should reject removal by non-operator", async function () {
+      const { nexoidModule, operator, agent1, stranger } =
+        await loadFixture(deployWithNexoidModuleFixture);
+
+      await nexoidModule.connect(operator).registerAgentSafe(agent1.address, agent1.address);
+
+      await expect(
+        nexoidModule.connect(stranger).removeAgentSafe(agent1.address)
+      ).to.be.revertedWith("Not operator of this agent Safe");
+    });
+
+    it("should return empty array for operator with no agents", async function () {
+      const { nexoidModule, stranger } =
+        await loadFixture(deployWithNexoidModuleFixture);
+
+      const agents = await nexoidModule.getAgentSafes(stranger.address);
+      expect(agents.length).to.equal(0);
+      expect(await nexoidModule.agentCount(stranger.address)).to.equal(0);
+    });
+
+    it("should return zero address for unregistered agent Safe", async function () {
+      const { nexoidModule, stranger } =
+        await loadFixture(deployWithNexoidModuleFixture);
+
+      expect(await nexoidModule.getOperator(stranger.address)).to.equal(hre.ethers.ZeroAddress);
+    });
+
+    it("should store createdAt timestamp", async function () {
+      const { nexoidModule, operator, agent1 } =
+        await loadFixture(deployWithNexoidModuleFixture);
+
+      await nexoidModule.connect(operator).registerAgentSafe(agent1.address, agent1.address);
+
+      const agents = await nexoidModule.getAgentSafes(operator.address);
+      expect(agents[0].createdAt).to.be.greaterThan(0);
+    });
+
+    it("should allow re-registration after removal", async function () {
+      const { nexoidModule, operator, agent1 } =
+        await loadFixture(deployWithNexoidModuleFixture);
+
+      await nexoidModule.connect(operator).registerAgentSafe(agent1.address, agent1.address);
+      await nexoidModule.connect(operator).removeAgentSafe(agent1.address);
+
+      // Should succeed after removal
+      await nexoidModule.connect(operator).registerAgentSafe(agent1.address, agent1.address);
+      expect(await nexoidModule.agentCount(operator.address)).to.equal(1);
+    });
+  });
 });

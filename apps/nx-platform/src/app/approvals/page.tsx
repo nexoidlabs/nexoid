@@ -104,7 +104,7 @@ export default function ApprovalsPage() {
                   onClick={() => handleAction(r.id, "deny")}
                   disabled={actioning === r.id}
                   style={{
-                    background: "var(--error)",
+                    background: "var(--danger)",
                     color: "white",
                     border: "none",
                     borderRadius: 6,

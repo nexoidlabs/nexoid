@@ -2,11 +2,25 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { Providers } from "./providers";
 import { WalletButton } from "./wallet-button";
+import { ThemeToggle } from "./theme-toggle";
+import { Sidebar } from "./sidebar";
 
 export const metadata: Metadata = {
   title: "Nexoid Admin",
   description: "Identity & Delegation Registry Management",
 };
+
+// Blocking script to apply theme before first paint — prevents flash
+const themeScript = `
+(function() {
+  try {
+    var t = localStorage.getItem('nexoid-theme');
+    if (t === 'light' || t === 'dark') {
+      document.documentElement.setAttribute('data-theme', t);
+    }
+  } catch(e) {}
+})();
+`;
 
 export default function RootLayout({
   children,
@@ -14,27 +28,32 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+      </head>
       <body>
         <Providers>
-          <div className="container">
-            <header className="header">
-              <div>
-                <h1>Nexoid Admin</h1>
-                <div className="subtitle">Identity & Delegation Registry</div>
+          <div className="app-shell">
+            <Sidebar />
+            <div className="main-content">
+              <header className="topbar">
+                <div className="topbar-left">
+                  <div>
+                    <h1>Admin Console</h1>
+                    <div className="breadcrumb">Identity & Delegation Registry</div>
+                  </div>
+                </div>
+                <div className="topbar-right">
+                  <ThemeToggle />
+                  <WalletButton />
+                </div>
+              </header>
+              <div className="page-content">
+                {children}
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-                <nav className="nav" style={{ border: "none", marginBottom: 0 }}>
-                  <a href="/">Dashboard</a>
-                  <a href="/identities">Identities</a>
-                  <a href="/delegations">Delegations</a>
-                  <a href="/approvals">Approvals</a>
-                  <a href="/wallet">Wallet</a>
-                </nav>
-                <WalletButton />
-              </div>
-            </header>
-            {children}
+            </div>
           </div>
         </Providers>
       </body>

@@ -69,4 +69,4 @@ export {
 } from './safe.js';
 
 // ABIs
-export { IdentityRegistryABI, DelegationRegistryABI, AllowanceModuleABI } from './abi/index.js';
+export { IdentityRegistryABI, DelegationRegistryABI, AllowanceModuleABI, NexoidModuleABI } from './abi/index.js';

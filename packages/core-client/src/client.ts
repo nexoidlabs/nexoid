@@ -72,6 +72,9 @@ import {
 import {
   deploySafe,
   enableAllowanceModule,
+  deployAgentSafe,
+  getAgentSafes,
+  fundAgentSafe,
   addDelegateAndSetAllowance,
   updateAllowance,
   sendFromSafe,
@@ -80,6 +83,7 @@ import {
   listDelegates,
   type SafeConfig,
   type SafeDeployResult,
+  type AgentSafeDeployResult,
 } from './safe.js';
 import {
   createProofDomain,
@@ -101,6 +105,7 @@ export class NexoidClient {
   private isMainnet: boolean;
   private tokenAddress: `0x${string}`;
   private allowanceModuleAddress: `0x${string}`;
+  private nexoidModuleAddress?: `0x${string}`;
 
   constructor(config: NexoidClientConfig) {
     this.config = config;
@@ -111,6 +116,7 @@ export class NexoidClient {
     const chain = isLocalhost ? hardhat : this.isMainnet ? mainnet : sepolia;
     this.tokenAddress = config.tokenAddress ?? (this.isMainnet ? USDT_ETH_MAINNET : USDT_ETH_SEPOLIA);
     this.allowanceModuleAddress = config.allowanceModuleAddress ?? ALLOWANCE_MODULE.ETH_MAINNET;
+    this.nexoidModuleAddress = config.nexoidModuleAddress;
 
     // Create viem clients
     const publicClient = createPublicClient({
@@ -184,6 +190,57 @@ export class NexoidClient {
    */
   async enableAllowanceModule(safeAddress: `0x${string}`): Promise<`0x${string}`> {
     return enableAllowanceModule(this.getSafeConfig(), safeAddress);
+  }
+
+  // ─── Agent Safe ───────────────────────────────────────────────
+
+  /**
+   * Deploy a new Safe for an agent.
+   * Creates a 1-of-1 Safe (operator as owner), enables AllowanceModule,
+   * adds agent EOA as delegate, registers with NexoidModule.
+   */
+  async deployAgentSafe(
+    agentEOA: `0x${string}`,
+    operatorSafeAddress: `0x${string}`
+  ): Promise<AgentSafeDeployResult> {
+    if (!this.nexoidModuleAddress) throw new Error('NexoidModule address not configured');
+    return deployAgentSafe(
+      this.getSafeConfig(),
+      operatorSafeAddress,
+      agentEOA,
+      this.nexoidModuleAddress
+    );
+  }
+
+  /**
+   * Get all agent Safes registered under an operator Safe.
+   */
+  async getAgentSafes(
+    operatorSafeAddress: `0x${string}`
+  ): Promise<Array<{ agentSafe: `0x${string}`; agentEOA: `0x${string}`; createdAt: bigint }>> {
+    if (!this.nexoidModuleAddress) throw new Error('NexoidModule address not configured');
+    return getAgentSafes(this.publicClient, this.nexoidModuleAddress, operatorSafeAddress);
+  }
+
+  /**
+   * Send USDT from operator's Safe to an agent's Safe.
+   */
+  async fundAgentSafe(
+    operatorSafeAddress: `0x${string}`,
+    agentSafeAddress: `0x${string}`,
+    amount: string
+  ): Promise<`0x${string}`> {
+    return fundAgentSafe(
+      this.getSafeConfig(),
+      operatorSafeAddress,
+      agentSafeAddress,
+      amount
+    );
+  }
+
+  /** Get the NexoidModule address being used */
+  getNexoidModuleAddress(): `0x${string}` | undefined {
+    return this.nexoidModuleAddress;
   }
 
   // ─── Identity ───────────────────────────────────────────────
@@ -324,21 +381,38 @@ export class NexoidClient {
   }
 
   /**
-   * Set spending allowance for an agent on the operator's Safe.
-   * Adds the agent as a delegate and sets their USDT allowance via AllowanceModule.
+   * Set spending allowance for an agent.
+   *
+   * If agentSafeAddress is provided, sets allowance on the agent's own Safe.
+   * Otherwise falls back to setting on the operator's Safe (legacy).
    *
    * @param opts.agentDid - Agent's DID
    * @param opts.amount - USDT allowance amount (human-readable)
-   * @param safeAddress - Operator's Safe address
+   * @param safeAddress - Safe address to set allowance on (agent's Safe or operator's Safe)
    * @param resetTimeMin - Auto-reset period in minutes (0 = no reset, 1440 = daily)
+   * @param agentSafeAddress - Agent's own Safe address (new architecture)
    */
   async setAllowance(
     opts: AllowanceOpts,
     safeAddress?: `0x${string}`,
-    resetTimeMin = 0
+    resetTimeMin = 0,
+    agentSafeAddress?: `0x${string}`
   ): Promise<`0x${string}`> {
+    const agentAddress = didToAddress(opts.agentDid);
+
+    // New architecture: set allowance on agent's own Safe
+    if (agentSafeAddress) {
+      return addDelegateAndSetAllowance(
+        this.getSafeConfig(),
+        agentSafeAddress,
+        agentAddress,
+        opts.amount,
+        resetTimeMin
+      );
+    }
+
+    // Legacy: set allowance on operator's Safe
     if (safeAddress) {
-      const agentAddress = didToAddress(opts.agentDid);
       return addDelegateAndSetAllowance(
         this.getSafeConfig(),
         safeAddress,
@@ -351,7 +425,6 @@ export class NexoidClient {
     // Legacy: ERC-20 approve
     if (!this.operatorDid) throw new Error('Operator DID not set');
     const { setAllowance: setAllowanceOnChain } = await import('@nexoid/nx-core');
-    const agentAddress = didToAddress(opts.agentDid);
     return setAllowanceOnChain(this.walletOps, agentAddress, opts.amount);
   }
 
