@@ -202,6 +202,16 @@ export const ERC20_ABI = [
   },
   {
     type: "function",
+    name: "transfer",
+    inputs: [
+      { name: "to", type: "address" },
+      { name: "amount", type: "uint256" },
+    ],
+    outputs: [{ name: "", type: "bool" }],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
     name: "decimals",
     inputs: [],
     outputs: [{ name: "", type: "uint8" }],

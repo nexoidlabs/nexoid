@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useWallet } from "@/lib/wallet";
 import {
   getRegistryAddress,
@@ -33,7 +33,9 @@ import {
   addStoredAgent,
   getSafeAddress,
   type LinkedDid,
+  type StoredAgent,
 } from "@/lib/storage";
+import { SlidePanel } from "../slide-panel";
 
 // --- Helpers ---
 
@@ -129,7 +131,21 @@ export default function IdentitiesPage() {
   // Agents: on-chain + local
   const [onChainAgents, setOnChainAgents] = useState<OnChainAgent[]>([]);
   const [agentsLoading, setAgentsLoading] = useState(true);
-  const [storedAgents, setStoredAgents] = useState(getStoredAgents());
+  const [storedAgents, setStoredAgents] = useState<StoredAgent[]>([]);
+
+  // Panel state
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [panelAgentSafe, setPanelAgentSafe] = useState<string | null>(null);
+  const [panelMode, setPanelMode] = useState<"details" | "delegate">("details");
+  const [panelIdentity, setPanelIdentity] = useState<IdentityInfo | null>(null);
+  const [delegatePending, setDelegatePending] = useState(false);
+  const [delegateSuccess, setDelegateSuccess] = useState("");
+
+  // Drag state (HTML5 native)
+  const [isDragging, setIsDragging] = useState(false);
+  const [hoverTarget, setHoverTarget] = useState<string | null>(null);
+  const [dragIdentity, setDragIdentity] = useState<IdentityInfo | null>(null);
+  const dragImageRef = useRef<HTMLDivElement>(null);
 
   // Load data on mount and when wallet connects
   useEffect(() => {
@@ -486,6 +502,107 @@ export default function IdentitiesPage() {
     }
   };
 
+  // --- Panel resolved agent ---
+  const panelAgent = panelAgentSafe
+    ? mergedAgents.find((a) => a.agentSafe === panelAgentSafe) ?? null
+    : null;
+
+  // --- HTML5 Drag handlers ---
+  const onIdentityDragStart = (e: React.DragEvent, identity: IdentityInfo) => {
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", "identity");
+    if (dragImageRef.current) {
+      e.dataTransfer.setDragImage(dragImageRef.current, 28, 28);
+    }
+    setDragIdentity(identity);
+    setIsDragging(true);
+  };
+
+  const onIdentityDragEnd = () => {
+    setIsDragging(false);
+    setHoverTarget(null);
+    setDragIdentity(null);
+  };
+
+  const onAgentDragOver = (e: React.DragEvent, agentSafe: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setHoverTarget(agentSafe);
+  };
+
+  const onAgentDragLeave = () => {
+    setHoverTarget(null);
+  };
+
+  const onAgentDrop = (e: React.DragEvent, agentSafe: string) => {
+    e.preventDefault();
+    setIsDragging(false);
+    setHoverTarget(null);
+    if (dragIdentity) {
+      setPanelAgentSafe(agentSafe);
+      setPanelIdentity(dragIdentity);
+      setPanelMode("delegate");
+      setDelegateSuccess("");
+      setPanelOpen(true);
+    }
+    setDragIdentity(null);
+  };
+
+  // --- Panel handlers ---
+  const openAgentDetails = (agentSafe: string) => {
+    setPanelAgentSafe(agentSafe);
+    setPanelMode("details");
+    setDelegateSuccess("");
+    setPanelOpen(true);
+  };
+
+  const closePanel = () => {
+    setPanelOpen(false);
+    setPanelAgentSafe(null);
+    setPanelIdentity(null);
+    setDelegateSuccess("");
+  };
+
+  const copyText = (text: string) => {
+    navigator.clipboard.writeText(text);
+  };
+
+  // --- Delegate identity to agent ---
+  const handleDelegate = async () => {
+    if (!walletClient || !walletAddress || !panelAgent || !panelIdentity || !nexoidModuleAddress) return;
+
+    setDelegatePending(true);
+    setDelegateSuccess("");
+    setError(null);
+    try {
+      const credential = {
+        identity: panelIdentity.did,
+        identityType: panelIdentity.entityType,
+        operator: `did:nexoid:eth:${walletAddress.toLowerCase()}`,
+        delegatedAt: Math.floor(Date.now() / 1000),
+      };
+      const credentialHash = canonicalHash(credential as Record<string, unknown>);
+
+      const tx = await walletClient.writeContract({
+        chain,
+        account: walletAddress,
+        gas: 500_000n,
+        address: nexoidModuleAddress,
+        abi: NEXOID_MODULE_ABI,
+        functionName: "updateAgentScope",
+        args: [panelAgent.agentSafe as `0x${string}`, ZERO_BYTES32, credentialHash, 0n],
+      });
+      await publicClient.waitForTransactionReceipt({ hash: tx });
+
+      setDelegateSuccess(`Identity delegated to agent ${panelAgent.agentSafe.slice(0, 10)}...`);
+      loadOnChainAgents();
+    } catch (e) {
+      showError(e instanceof Error ? e.message.slice(0, 300) : "Delegation failed");
+    } finally {
+      setDelegatePending(false);
+    }
+  };
+
   return (
     <div>
       {error && <div className="error-msg">{error}</div>}
@@ -561,7 +678,14 @@ export default function IdentitiesPage() {
         ) : identities.length > 0 ? (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 16 }}>
             {identities.map((id) => (
-              <div key={id.did} className="card" style={{ padding: 20 }}>
+              <div
+                key={id.did}
+                className={`card ${mergedAgents.length > 0 ? "draggable-card" : ""}`}
+                style={{ padding: 20 }}
+                draggable={mergedAgents.length > 0}
+                onDragStart={(e) => onIdentityDragStart(e, id)}
+                onDragEnd={onIdentityDragEnd}
+              >
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
                   <div style={{
                     width: 40, height: 40, borderRadius: "var(--radius-sm)",
@@ -588,10 +712,13 @@ export default function IdentitiesPage() {
                     Owner: <span className="mono">{id.owner.slice(0, 6)}...{id.owner.slice(-4)}</span>
                   </div>
                 )}
-                <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
-                  <button className="btn btn-danger" style={{ fontSize: 11, padding: "2px 8px" }} onClick={() => unlinkDid(id.did)}>
+                <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <button className="btn btn-danger" style={{ fontSize: 11, padding: "2px 8px" }} onClick={(e) => { e.stopPropagation(); unlinkDid(id.did); }}>
                     Unlink
                   </button>
+                  {mergedAgents.length > 0 && (
+                    <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Drag to agent to delegate</span>
+                  )}
                 </div>
               </div>
             ))}
@@ -825,7 +952,15 @@ export default function IdentitiesPage() {
               const isExpired = agent.validUntil > 0 && agent.validUntil < Date.now() / 1000;
               const isValid = agent.status === 0 && !isExpired;
               return (
-                <div key={agent.agentSafe} className="card" style={{ padding: 20 }}>
+                <div
+                  key={agent.agentSafe}
+                  className={`card drop-target ${isDragging ? (hoverTarget === agent.agentSafe ? "drop-target-hover" : "drop-target-active") : ""}`}
+                  style={{ padding: 20, cursor: "pointer" }}
+                  onClick={() => openAgentDetails(agent.agentSafe)}
+                  onDragOver={(e) => onAgentDragOver(e, agent.agentSafe)}
+                  onDragLeave={onAgentDragLeave}
+                  onDrop={(e) => onAgentDrop(e, agent.agentSafe)}
+                >
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
                     <div style={{
                       width: 40, height: 40, borderRadius: "var(--radius-sm)",
@@ -857,7 +992,8 @@ export default function IdentitiesPage() {
                     <button
                       className="btn"
                       style={{ fontSize: 11, padding: "4px 10px" }}
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.stopPropagation();
                         const config = [
                           `AGENT_ADDRESS=${agent.agentEOA}`,
                           `AGENT_SAFE_ADDRESS=${agent.agentSafe}`,
@@ -871,6 +1007,16 @@ export default function IdentitiesPage() {
                       Copy nxcli Config
                     </button>
                   </div>
+                  {isDragging && hoverTarget === agent.agentSafe && (
+                    <div style={{
+                      position: "absolute", inset: 0, borderRadius: "inherit",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      background: "rgba(255,255,255,0.06)",
+                      pointerEvents: "none", transition: "background 0.2s",
+                    }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: "var(--accent)" }}>Drop to delegate</span>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -933,6 +1079,191 @@ export default function IdentitiesPage() {
           </div>
         ) : null}
       </div>
+
+      {/* Hidden drag image for custom cursor */}
+      <div
+        ref={dragImageRef}
+        style={{
+          position: "fixed", top: -200, left: -200,
+          width: 56, height: 56, borderRadius: "50%",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          background: "rgba(139, 92, 246, 0.3)", border: "2px solid #8b5cf6",
+          color: "#8b5cf6", fontSize: 10, fontWeight: 700,
+          textTransform: "uppercase", letterSpacing: "0.06em",
+        }}
+      >
+        ID
+      </div>
+
+      {/* Agent details / delegation panel */}
+      <SlidePanel
+        isOpen={panelOpen}
+        onClose={closePanel}
+        title={panelMode === "delegate" ? "Delegate Identity" : "Agent Details"}
+      >
+        {panelAgent && panelMode === "details" && (
+          <div>
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>Agent DID</div>
+              <div className="mono" style={{ fontSize: 13, wordBreak: "break-all", marginBottom: 8 }}>
+                did:nexoid:eth:{panelAgent.agentEOA.toLowerCase()}
+              </div>
+              <button className="btn btn-sm" onClick={() => copyText(`did:nexoid:eth:${panelAgent.agentEOA.toLowerCase()}`)} style={{ fontSize: 11 }}>Copy DID</button>
+            </div>
+
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>Agent Safe</div>
+              <div className="mono" style={{ fontSize: 13, wordBreak: "break-all", marginBottom: 8 }}>{panelAgent.agentSafe}</div>
+              <button className="btn btn-sm" onClick={() => copyText(panelAgent.agentSafe)} style={{ fontSize: 11 }}>Copy</button>
+            </div>
+
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>Agent EOA</div>
+              <div className="mono" style={{ fontSize: 13, wordBreak: "break-all", marginBottom: 8 }}>{panelAgent.agentEOA}</div>
+              <button className="btn btn-sm" onClick={() => copyText(panelAgent.agentEOA)} style={{ fontSize: 11 }}>Copy</button>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }}>
+              <div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>Status</div>
+                <span className={`badge badge-${panelAgent.statusName.toLowerCase()}`}>{panelAgent.statusName}</span>
+              </div>
+              <div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>Valid Until</div>
+                <div style={{ fontSize: 13 }}>
+                  {panelAgent.validUntil > 0 ? new Date(panelAgent.validUntil * 1000).toLocaleDateString() : "No expiry"}
+                </div>
+              </div>
+            </div>
+
+            {panelAgent.scopeHash && panelAgent.scopeHash !== ZERO_BYTES32 && (
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>Scope Hash</div>
+                <div className="mono" style={{ fontSize: 11, wordBreak: "break-all", color: "var(--text-secondary)" }}>{panelAgent.scopeHash}</div>
+              </div>
+            )}
+
+            {panelAgent.credentialHash && panelAgent.credentialHash !== ZERO_BYTES32 && (
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>Credential Hash</div>
+                <div className="mono" style={{ fontSize: 11, wordBreak: "break-all", color: "var(--text-secondary)" }}>{panelAgent.credentialHash}</div>
+              </div>
+            )}
+
+            {panelAgent.local && (
+              <div style={{ marginBottom: 20, padding: 12, background: "var(--bg-input)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)" }}>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: "var(--text-secondary)" }}>Local Metadata</div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>
+                  Label: <span style={{ color: "var(--text)" }}>{panelAgent.local.label}</span>
+                </div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                  Created: {new Date(panelAgent.local.createdAt).toLocaleString()}
+                </div>
+              </div>
+            )}
+
+            <button
+              className="btn"
+              style={{ width: "100%", marginBottom: 8 }}
+              onClick={() => {
+                const config = [
+                  `AGENT_ADDRESS=${panelAgent.agentEOA}`,
+                  `AGENT_SAFE_ADDRESS=${panelAgent.agentSafe}`,
+                  panelAgent.local?.mnemonic ? `AGENT_MNEMONIC="${panelAgent.local.mnemonic}"` : "",
+                  panelAgent.local?.mnemonicIndex !== undefined ? `AGENT_MNEMONIC_INDEX=${panelAgent.local.mnemonicIndex}` : "",
+                ].filter(Boolean).join("\n");
+                navigator.clipboard.writeText(config);
+                showSuccess("Agent config copied to clipboard.");
+              }}
+            >
+              Copy nxcli Config
+            </button>
+
+            {identities.length > 0 && (
+              <div style={{ marginTop: 12 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Delegate Identity</div>
+                <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8 }}>
+                  Drag an identity card onto this agent, or select below:
+                </div>
+                {identities.map((id) => (
+                  <button
+                    key={id.did}
+                    className="btn"
+                    style={{ width: "100%", marginBottom: 4, justifyContent: "flex-start", textAlign: "left" }}
+                    onClick={() => {
+                      setPanelIdentity(id);
+                      setPanelMode("delegate");
+                      setDelegateSuccess("");
+                    }}
+                  >
+                    <span style={{ fontSize: 12 }}>{id.entityType} — {id.did.slice(0, 24)}...{id.did.slice(-4)}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {panelAgent && panelMode === "delegate" && panelIdentity && (
+          <div>
+            {/* Identity being delegated */}
+            <div style={{ marginBottom: 16, padding: 16, background: "var(--bg-input)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)" }}>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>Identity</div>
+              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>{panelIdentity.entityType}</div>
+              <div className="mono" style={{ fontSize: 12, color: "var(--text-muted)", wordBreak: "break-all" }}>{panelIdentity.did}</div>
+              <div style={{ marginTop: 4 }}>
+                <span className={`badge badge-${panelIdentity.status.toLowerCase()}`}>{panelIdentity.status}</span>
+              </div>
+            </div>
+
+            {/* Arrow */}
+            <div style={{ textAlign: "center", padding: "4px 0", color: "var(--text-muted)" }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <polyline points="19 12 12 19 5 12" />
+              </svg>
+            </div>
+
+            {/* Target agent */}
+            <div style={{ marginBottom: 20, padding: 16, background: "var(--bg-input)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)" }}>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>Agent</div>
+              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>
+                {panelAgent.local?.label || `Agent ${panelAgent.agentEOA.slice(0, 8)}...`}
+              </div>
+              <div className="mono" style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                Safe: {panelAgent.agentSafe}
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 16, padding: 12, background: "var(--accent-soft)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)", fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6 }}>
+              This will update the agent&apos;s credential hash on the NexoidModule, binding this identity to the agent on-chain.
+            </div>
+
+            {delegateSuccess && (
+              <div style={{ marginBottom: 16, padding: 12, background: "var(--success-soft)", border: "1px solid rgba(52, 211, 153, 0.2)", borderRadius: "var(--radius-sm)", color: "var(--success)", fontSize: 13 }}>
+                {delegateSuccess}
+              </div>
+            )}
+
+            <button
+              className="btn btn-primary"
+              style={{ width: "100%" }}
+              onClick={handleDelegate}
+              disabled={delegatePending || !nexoidModuleAddress}
+            >
+              {delegatePending ? "Delegating..." : "Delegate Identity to Agent"}
+            </button>
+
+            <button
+              className="btn"
+              style={{ width: "100%", marginTop: 8 }}
+              onClick={() => setPanelMode("details")}
+            >
+              Back to Details
+            </button>
+          </div>
+        )}
+      </SlidePanel>
     </div>
   );
 }
