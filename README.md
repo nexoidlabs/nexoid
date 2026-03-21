@@ -4,36 +4,117 @@
 
 > Hackathon submission for [Tether Hackathon Galactica: WDK Edition 1](https://dorahacks.io/) — Track 1: Agent Wallets
 
-## What Nexoid Does
+## The Problem
 
-AI agents can reason and act, but they cannot prove who they are, spend money within guardrails, or be held accountable. Nexoid solves this:
+AI agents are increasingly capable of autonomous decision-making, but today's infrastructure treats them as second-class citizens. There is no standard way for an agent to:
+
+- **Prove its identity** to a counterparty or service
+- **Spend money** within operator-defined guardrails
+- **Be held accountable** for its on-chain actions
+- **Derive keys deterministically** so operators can recover and audit agent wallets
+
+Without these primitives, operators must either give agents unrestricted access to funds (dangerous) or manually approve every transaction (defeats the purpose of automation). The result: agents that can reason but cannot transact.
+
+## The Solution
+
+Nexoid provides a governed autonomy stack that sits between operators and their AI agents. A single WDK seed phrase (BIP-39) deterministically derives all keys — the operator's EOA and every agent's EOA — making the entire key hierarchy recoverable and auditable from one mnemonic.
+
+Each agent gets a registered on-chain identity, a Safe smart wallet with EVM-enforced spending limits, and the ability to generate cryptographic proofs of who it is and what it's allowed to do. Operators set budgets, scopes, and expiry — then let agents operate autonomously within those bounds.
 
 | Feature | Description |
 |---------|-------------|
 | **On-chain Identity** | Register operators and agents on the Ethereum IdentityRegistry |
-| **Scoped Delegation** | Flat operator→agent delegation with budget limits, max transaction amounts, and expiry |
+| **Scoped Delegation** | Flat operator-to-agent delegation with budget limits, max transaction amounts, and expiry |
 | **Safe Smart Wallets** | Operator funds held in Safe{Wallet} with AllowanceModule for per-agent spending limits |
-| **WDK Key Derivation** | BIP-44 HD key derivation (m/44'/60'/0'/0/{index}) — deterministic, recoverable agent keys |
+| **WDK Key Derivation** | Tether WDK provides BIP-44 HD key derivation (m/44'/60'/0'/0/{index}) — deterministic, recoverable agent keys from a single seed |
 | **EIP-712 Identity Proof** | Agents generate verifiable cryptographic proofs of identity and delegation |
-| **Approval Workflow** | Agents request additional funds, operators approve via dashboard |
+| **Mobile Wallet** | React Native app for operators to manage agents, monitor balances, and approve transactions on the go |
 
 ## Architecture
 
-```
-Operator (Human)
-  └─ WDK Seed Phrase (BIP-39)
-       ├─ m/44'/60'/0'/0/0 → Operator EOA
-       │    └─ Safe{Wallet} (1-of-1, AllowanceModule enabled)
-       │         ├─ USDT balance
-       │         └─ Per-agent allowances
-       ├─ m/44'/60'/0'/0/1 → Agent Alpha (100 USDT/day)
-       └─ m/44'/60'/0'/0/2 → Agent Beta (50 USDT, no reset)
+![NX System Architecture](architecture.png)
 
-On-chain:
-  IdentityRegistry ← register operators + agents
-  NexoidModule ← agent registry with embedded scope, status, expiry
-  AllowanceModule ← per-agent USDT spending limits (EVM-enforced)
 ```
+                          Tether WDK (BIP-39 Seed Phrase)
+                                      |
+                          BIP-44 HD Key Derivation
+                         m/44'/60'/0'/0/{index}
+                                      |
+                 +--------------------+--------------------+
+                 |                    |                    |
+            index 0              index 1              index 2
+         Operator EOA          Agent Alpha EOA       Agent Beta EOA
+                 |                    |                    |
+    +------------+-------+     +-----+-----+        +-----+-----+
+    |                    |     |           |        |           |
+  Safe{Wallet}     NX Platform |      Agent Safe   |      Agent Safe
+  (1-of-1)        (Dashboard)  |      (1-of-1)     |      (1-of-1)
+    |                          |           |        |           |
+    +--- USDT balance          |    100 USDT/day    |    50 USDT once
+    +--- AllowanceModule ------+--- per-agent ------+--- spending
+    +--- NexoidModule              limits                limits
+              |
+    +---------+---------+
+    |         |         |
+ register  suspend   revoke
+  agents    agents    agents
+```
+
+### On-chain Contracts (Ethereum Sepolia)
+
+```
++---------------------+     +---------------------+     +---------------------+
+|  IdentityRegistry   |     |    NexoidModule      |     |  AllowanceModule    |
+|---------------------|     |---------------------|     |---------------------|
+| registerIdentity()  |     | registerAgentSafe() |     | addDelegate()       |
+| getIdentity()       |     | suspendAgent()      |     | setAllowance()      |
+| isRegistered()      |     | revokeAgent()       |     | executeAllowance-   |
+| updateMetadata()    |     | reactivateAgent()   |     |   Transfer()        |
+|                     |     | getAgentSafes()     |     | getDelegates()      |
+|                     |     | getAgentRecord()    |     | getTokenAllowance() |
++---------------------+     +---------------------+     +---------------------+
+        ^                           ^                           ^
+        |                           |                           |
+   Operator Safe            Operator Safe                Agent Safe
+   (owner call)             (module tx)                  (delegate spend)
+```
+
+### Data Flow
+
+```
+Operator                        On-chain                         Agent
+   |                               |                               |
+   |-- WDK init (seed phrase) ---->|                               |
+   |   [derives all keys]          |                               |
+   |                               |                               |
+   |-- registerIdentity() ------->| IdentityRegistry              |
+   |-- registerAgentSafe() ------>| NexoidModule                  |
+   |-- addDelegate() ------------>| AllowanceModule               |
+   |-- setAllowance(USDT,100) --->| AllowanceModule               |
+   |                               |                               |
+   |                               |<-- executeAllowanceTransfer() |
+   |                               |    [spends within limit]      |
+   |                               |                               |
+   |<-- monitor via NX Platform ---|                               |
+   |<-- monitor via NX Wallet -----|                               |
+```
+
+### Where Tether WDK is Used
+
+Every on-chain action flows through WDK: deriving keys, signing transactions, executing USDT transfers, and wrapping accounts as EIP-1193 providers for Safe SDK compatibility.
+
+| Layer | WDK Role |
+|-------|----------|
+| **Key Derivation** | BIP-44 HD path `m/44'/60'/0'/0/{index}` — single seed phrase deterministically derives operator EOA (index 0) and every agent EOA (index 1+). All keys are recoverable from one mnemonic. |
+| **Transaction Signing** | `account.sendTransaction()` signs and broadcasts all on-chain transactions — identity registration, agent Safe deployment, delegation, allowance configuration. WDK manages nonce, gas estimation, and submission. |
+| **USDT Transfers** | `account.sendTransaction({ to, data })` executes ERC-20 `transfer()` calls for USDT spending within allowance limits. WDK handles ABI encoding, gas estimation, and transaction receipt tracking. |
+| **EIP-1193 Provider** | `WDKProviderAdapter` wraps the WDK account as a standard EIP-1193 provider, enabling Safe Protocol Kit integration. Handles `eth_signTypedData_v4` (Safe transaction signatures), `personal_sign` (message signing), `eth_sendTransaction` (broadcast), and `eth_accounts`/`eth_chainId` queries. |
+| **Balance Queries** | `WalletManagerEvm.getBalance()` and token balance lookups provide real-time ETH and USDT balance information across operator and agent wallets. |
+| **Safe Smart Wallets** | WDK-derived EOA serves as the sole signer (1-of-1) for both operator and agent Safe wallets. Safe Protocol Kit delegates all signing to WDK via the EIP-1193 adapter. |
+| **NX Wallet (mobile)** | `WDKService` initializes WDK with seed, registers `ethereum` chain via `WalletManagerEvm`. Provides address derivation, transaction signing, USDT transfers, and fee estimation to the React Native UI. |
+| **NX Platform (dashboard)** | WDK derives operator keys and signs Safe module transactions (agent registration, suspension, revocation). |
+| **Core Client SDK** | `NexoidClient.fromSeedPhrase()` uses WDK for deterministic key derivation across all agent indices, enabling programmatic agent management. |
+| **CLI (nxcli)** | Agent creation, delegation, allowance setting, and USDT sending — all signed and broadcast via WDK. |
 
 ## Project Structure
 
@@ -138,4 +219,9 @@ tsx scripts/03-create-agents.ts
 tsx scripts/05-deploy-safe.ts
 tsx scripts/06-set-allowances.ts
 tsx scripts/07-fund-agents-eth.ts
+```
+
+Then run the agent demo:
+```bash
+tsx demo/agent-scenario.ts
 ```
