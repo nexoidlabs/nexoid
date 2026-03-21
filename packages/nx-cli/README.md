@@ -33,7 +33,7 @@ nxcli --help
 
 ```bash
 nxcli init \
-  --rpc-url https://mainnet.base.org \
+  --rpc-url https://eth-sepolia.g.alchemy.com/v2/YOUR_KEY \
   --registry 0xYourRegistryAddress \
   --module 0xYourModuleAddress \
   --private-key 0xYourPrivateKey
@@ -45,7 +45,7 @@ You can also supply values via environment variables instead of storing them in 
 
 ```bash
 export NEXOID_PRIVATE_KEY=0x...
-export NEXOID_RPC_URL=https://mainnet.base.org
+export NEXOID_RPC_URL=https://eth-sepolia.g.alchemy.com/v2/YOUR_KEY
 export NEXOID_REGISTRY=0x...
 export NEXOID_MODULE=0x...
 ```
@@ -68,17 +68,17 @@ Output includes the agent's DID, address, and a one-time API key. Save the API k
 ### 4. Delegate permissions
 
 ```bash
-nxcli delegate did:nexoid:base:0xAgentAddr \
+nxcli delegate did:nexoid:eth:0xAgentAddr \
   --budget 500 --budget-period monthly \
   --max-tx 50 \
-  --tools send_usdc,get_balance
+  --tools send_usdt,get_balance
 ```
 
 ### 5. Send funds
 
 ```bash
 nxcli send 0xRecipientAddress 10.00 --reason "Service payment"
-nxcli send did:nexoid:base:0xRecipient 5.00     # DIDs also work
+nxcli send did:nexoid:eth:0xRecipient 5.00     # DIDs also work
 ```
 
 ## Commands
@@ -113,9 +113,9 @@ nxcli send did:nexoid:base:0xRecipient 5.00     # DIDs also work
 
 | Command | Description |
 |---------|-------------|
-| `nxcli balance` | Show USDC and ETH balances |
-| `nxcli send <to> <amount> [--reason]` | Send USDC to an address or DID |
-| `nxcli set-allowance <agentDid> <amount>` | Set USDC spending allowance for an agent |
+| `nxcli balance` | Show USDT and ETH balances |
+| `nxcli send <to> <amount> [--reason]` | Send USDT to an address or DID |
+| `nxcli set-allowance <agentDid> <amount>` | Set USDT spending allowance for an agent |
 | `nxcli get-allowance <agentDid>` | Query current allowance |
 | `nxcli request-funds <amount> --reason <text>` | Request funds from operator |
 
@@ -174,10 +174,10 @@ Config lives at `~/.nxcli/config.json` with file permissions `0600` (owner read/
   "defaultProfile": "default",
   "profiles": {
     "default": {
-      "rpcUrl": "https://mainnet.base.org",
+      "rpcUrl": "https://eth-sepolia.g.alchemy.com/v2/YOUR_KEY",
       "registryAddress": "0x...",
       "moduleAddress": "0x...",
-      "usdcAddress": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "usdtAddress": "0xaA8E23Fb1079EA71e0a56F48a2aA51851D8433D0",
       "privateKey": "0x...",
       "databaseUrl": "postgresql://..."
     }
@@ -188,7 +188,7 @@ Config lives at `~/.nxcli/config.json` with file permissions `0600` (owner read/
 ### Multiple profiles
 
 ```bash
-nxcli init --profile staging --rpc-url https://sepolia.base.org ...
+nxcli init --profile staging --rpc-url https://ethereum-sepolia-rpc.publicnode.com ...
 nxcli balance --profile staging
 ```
 
@@ -202,7 +202,7 @@ Environment variables take highest precedence over config file values:
 | `NEXOID_PRIVATE_KEY` | `privateKey` |
 | `NEXOID_REGISTRY` | `registryAddress` |
 | `NEXOID_MODULE` | `moduleAddress` |
-| `NEXOID_USDC` | `usdcAddress` |
+| `NEXOID_USDT` | `usdtAddress` |
 | `NEXOID_DATABASE_URL` | `databaseUrl` |
 
 ## Machine-Readable Output
@@ -212,10 +212,10 @@ All commands support `--json` for agent consumption:
 ```bash
 # Structured JSON on stdout, errors as JSON on stderr
 nxcli whoami --json
-# {"did":"did:nexoid:base:0x...","address":"0x...","status":"0","entityType":"0"}
+# {"did":"did:nexoid:eth:0x...","address":"0x...","status":"0","entityType":"0"}
 
 nxcli balance --json
-# {"USDC":"142.50","ETH":"0.0341"}
+# {"USDT":"142.50","ETH":"0.0341"}
 
 nxcli send 0xDead...beef 10.00 --json
 # {"txHash":"0x...","to":"0x...","amount":"10.00"}
@@ -232,7 +232,7 @@ Preview any write operation without submitting a transaction:
 
 ```bash
 nxcli send 0xDead...beef 100.00 --dry-run
-# ⚠ [dry-run] Would call sendUSDC({"to":"0xDead...beef","amount":"100.00"})
+# ⚠ [dry-run] Would call sendUSDT({"to":"0xDead...beef","amount":"100.00"})
 ```
 
 This is critical for agent test runs and CI pipelines.
@@ -243,7 +243,7 @@ This is critical for agent test runs and CI pipelines.
 nxcli ──> NexoidClient (@nexoid/core-client)
              ├── Identity ops     (IdentityRegistry contract via nx-core)
              ├── Delegation ops   (SafeIdentityModule contract via nx-core)
-             ├── Financial ops    (USDC ERC-20 via nx-core)
+             ├── Financial ops    (USDT ERC-20 via nx-core)
              └── Audit emission   (@nexoid/audit-lib)
 ```
 

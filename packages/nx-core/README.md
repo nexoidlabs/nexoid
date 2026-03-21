@@ -1,12 +1,12 @@
 # NX-Core — Identity & Wallets
 
-Foundation layer. On-chain identity and wallet infrastructure on Base Mainnet.
+Foundation layer. On-chain identity and wallet infrastructure on Ethereum.
 
 Answers: **"Who is this agent, and what is it allowed to do?"**
 
 ## Key Components
 
-- **IdentityRegistry** — Global DID registry (`did:nexoid:base:<address>`)
+- **IdentityRegistry** — Global DID registry (`did:nexoid:eth:<address>`)
 - **SafeIdentityModule** — Scoped delegation chains with cascading revocation
 - **Wallet Primitives** — Safe smart contract wallets with dual-key model (human owner + agent operator)
 - **Credential Anchoring** — On-chain hashes of W3C Verifiable Credentials

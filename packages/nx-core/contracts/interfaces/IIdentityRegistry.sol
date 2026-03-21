@@ -5,7 +5,7 @@ pragma solidity ^0.8.24;
  * @title IIdentityRegistry
  * @notice Interface for the Nexoid Identity Registry
  * @dev Four entity types: Human, VirtualAgent, PhysicalAgent, Organization
- *      DID format: did:nexoid:base:<address>
+ *      DID format: did:nexoid:eth:<address>
  */
 interface IIdentityRegistry {
     enum EntityType { Human, VirtualAgent, PhysicalAgent, Organization }

@@ -11,7 +11,7 @@ ${chalk.bold.underline('QUICK START')}
 
   ${chalk.dim('# 2. You set up your CLI and deploy a Safe wallet')}
   ${chalk.cyan('$')} export NEXOID_PRIVATE_KEY=0x...
-  ${chalk.cyan('$')} nxcli init --rpc-url https://mainnet.base.org \\
+  ${chalk.cyan('$')} nxcli init --rpc-url https://eth-sepolia.g.alchemy.com/v2/YOUR_KEY \\
        --registry 0x... --nexoid-module 0x...
   ${chalk.cyan('$')} nxcli register                  ${chalk.dim('# verify identity + deploy Safe')}
   ${chalk.cyan('$')} nxcli whoami                     ${chalk.dim('# verify your identity')}

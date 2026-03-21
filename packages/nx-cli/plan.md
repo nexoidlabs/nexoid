@@ -32,7 +32,7 @@ The CLI wraps `NexoidClient` from `@nexoid/core-client`, which interacts directl
 | Exit codes 1/2/3 | Agents branch on exit code without parsing stderr text |
 | `--dry-run` flag | Prevents on-chain tx; critical for agent test runs |
 | `--json` flag | Agents parse stdout cleanly; no stdout corruption from stray logs |
-| DID resolution for `send <to>` | Accepts both `0x` addresses and `did:nexoid:base:...` DIDs |
+| DID resolution for `send <to>` | Accepts both `0x` addresses and `did:nexoid:eth:...` DIDs |
 
 ---
 
@@ -94,7 +94,7 @@ interface NxCliProfile {
   registryAddress: `0x${string}`;
   delegationRegistryAddress: `0x${string}`;
   safeAddress?: `0x${string}`;          // Operator's Safe (set after register)
-  usdcAddress?: `0x${string}`;          // Defaults to Base Mainnet USDC
+  usdtAddress?: `0x${string}`;          // Defaults to Sepolia USDT
 }
 
 interface NxCliConfig {
@@ -118,7 +118,7 @@ Config dir: `~/.nxcli/` (permissions: `0700`)
 | `NEXOID_REGISTRY` | `registryAddress` |
 | `NEXOID_DELEGATION_REGISTRY` | `delegationRegistryAddress` |
 | `NEXOID_SAFE` | `safeAddress` |
-| `NEXOID_USDC` | `usdcAddress` |
+| `NEXOID_USDT` | `usdtAddress` |
 
 ---
 
@@ -172,8 +172,8 @@ When mode is `agent`, the following commands are blocked with exit code 3:
 | `nxcli delegation validate <id>` | Validate delegation chain | valid, depth |
 | `nxcli delegation revoke <id>` | Revoke a delegation | txHash |
 | `nxcli set-allowance <agentDid> <amount>` | Set Safe AllowanceModule limit | txHash |
-| `nxcli balance` | Show Safe USDC + ETH | USDC, ETH |
-| `nxcli send <to> <amount>` | Send USDC from Safe (as owner) | txHash, to, amount |
+| `nxcli balance` | Show Safe USDT + ETH | USDT, ETH |
+| `nxcli send <to> <amount>` | Send USDT from Safe (as owner) | txHash, to, amount |
 | `nxcli credential verify-email <email>` | Start email verification | emailDomain, otp (dev) |
 | `nxcli credential confirm-email <otp>` | Complete verification | credential details |
 
@@ -215,11 +215,11 @@ When an operator runs `nxcli agent create`, the CLI:
   "profiles": {
     "default": {
       "mode": "agent",
-      "rpcUrl": "https://mainnet.base.org",
+      "rpcUrl": "https://eth-sepolia.g.alchemy.com/v2/YOUR_KEY",
       "registryAddress": "0x...",
       "delegationRegistryAddress": "0x...",
       "safeAddress": "0x...",
-      "usdcAddress": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+      "usdtAddress": "0xaA8E23Fb1079EA71e0a56F48a2aA51851D8433D0"
     }
   }
 }
@@ -237,7 +237,7 @@ The agent can then immediately use `nxcli --mode agent send ...` to transact.
 
 ## Dry-run implementation
 
-The `--dry-run` flag creates a Proxy around `NexoidClient` that intercepts write methods (`registerOperator`, `createAgent`, `updateIdentityStatus`, `delegate`, `revoke`, `sendUSDC`, `setAllowance`) and logs the intended call to stderr without submitting a transaction.
+The `--dry-run` flag creates a Proxy around `NexoidClient` that intercepts write methods (`registerOperator`, `createAgent`, `updateIdentityStatus`, `delegate`, `revoke`, `sendUSDT`, `setAllowance`) and logs the intended call to stderr without submitting a transaction.
 
 Read methods (`resolveIdentity`, `getBalance`, `getAllowance`, `validateDelegation`) execute normally.
 
@@ -266,7 +266,7 @@ Read methods (`resolveIdentity`, `getBalance`, `getAllowance`, `validateDelegati
 - [ ] `nxcli --mode agent whoami --json` — agent identity
 - [ ] `nxcli --mode agent send 0xDead...beef 1.00 --dry-run` — logs intent, exit 0
 - [ ] `nxcli --mode agent register` — blocked, exit 3
-- [ ] `nxcli balance --json` — `{"USDC":"...","ETH":"..."}`
+- [ ] `nxcli balance --json` — `{"USDT":"...","ETH":"..."}`
 - [ ] Missing config → exit 1
 - [ ] Bad command → exit 3
 

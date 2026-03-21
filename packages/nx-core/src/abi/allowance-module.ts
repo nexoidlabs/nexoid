@@ -1,7 +1,7 @@
 /**
  * AllowanceModule ABI — Safe singleton for per-delegate spending limits.
  *
- * Deployed on Base Mainnet at 0xCFbFaC74C26F8647cBDb8c5caf80BB5b32E43134
+ * Deployed on Ethereum Mainnet at 0xCFbFaC74C26F8647cBDb8c5caf80BB5b32E43134
  * This is a shared singleton — each Safe enables it as a module.
  *
  * Key design:

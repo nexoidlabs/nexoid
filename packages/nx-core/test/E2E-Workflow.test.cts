@@ -11,7 +11,7 @@ import { time, loadFixture } from "@nomicfoundation/hardhat-toolbox/network-help
  *   3. Operator creates agent identities
  *   4. Operator registers agent Safes with scope via NexoidModule
  *   5. Operator sets spending allowances for agents
- *   6. Agents send USDC within allowance limits
+ *   6. Agents send USDT within allowance limits
  *   7. Agent validation & revocation via NexoidModule
  *   8. Multi-agent fleet management
  *   9. Agent lifecycle (suspend, reactivate, revoke)
@@ -24,8 +24,8 @@ const EntityType = { Human: 0, VirtualAgent: 1, PhysicalAgent: 2, Organization: 
 const EntityStatus = { Active: 0, Suspended: 1, Revoked: 2 };
 const DelegationStatus = { Active: 0, Suspended: 1, Revoked: 2 };
 
-const USDC_DECIMALS = 6n;
-const toUSDC = (amount: bigint) => amount * 10n ** USDC_DECIMALS;
+const USDT_DECIMALS = 6n;
+const toUSDT = (amount: bigint) => amount * 10n ** USDT_DECIMALS;
 
 describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
 
@@ -34,9 +34,9 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
    * - IdentityRegistry
    * - NexoidModule (agent scope/status management)
    * - TestAllowanceModule
-   * - MockERC20 (USDC)
+   * - MockERC20 (USDT)
    * - Registrar authorized
-   * - Safe (simulated by safeOwner signer) funded with USDC
+   * - Safe (simulated by safeOwner signer) funded with USDT
    */
   async function deployFullSystemFixture() {
     const [
@@ -64,20 +64,20 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
     const AllowanceModule = await hre.ethers.getContractFactory("TestAllowanceModule");
     const allowanceModule = await AllowanceModule.connect(admin).deploy();
 
-    // Deploy MockERC20 (USDC, 6 decimals)
+    // Deploy MockERC20 (USDT, 6 decimals)
     const MockERC20 = await hre.ethers.getContractFactory("MockERC20");
-    const usdc = await MockERC20.deploy("USD Coin", "USDC", 6);
+    const usdt = await MockERC20.deploy("Tether USD", "USDT", 6);
 
     // Authorize registrar
     await registry.connect(admin).setRegistrar(registrar.address, true);
 
-    // In production, operator's Safe holds the USDC. Here we simulate the Safe
-    // as the operator signer. Mint USDC to operator (acting as Safe).
-    const SAFE_BALANCE = toUSDC(50000n); // 50,000 USDC
-    await usdc.mint(operator.address, SAFE_BALANCE);
+    // In production, operator's Safe holds the USDT. Here we simulate the Safe
+    // as the operator signer. Mint USDT to operator (acting as Safe).
+    const SAFE_BALANCE = toUSDT(50000n); // 50,000 USDT
+    await usdt.mint(operator.address, SAFE_BALANCE);
 
-    // Operator (Safe) approves AllowanceModule to transfer USDC
-    await usdc.connect(operator).approve(await allowanceModule.getAddress(), SAFE_BALANCE);
+    // Operator (Safe) approves AllowanceModule to transfer USDT
+    await usdt.connect(operator).approve(await allowanceModule.getAddress(), SAFE_BALANCE);
 
     // Metadata hashes
     const operatorMeta = hre.ethers.keccak256(hre.ethers.toUtf8Bytes("operator-meta-v1"));
@@ -92,7 +92,7 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
       registry,
       nexoidModule,
       allowanceModule,
-      usdc,
+      usdt,
       admin,
       registrar,
       operator,
@@ -118,13 +118,13 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
 
   describe("Phase 1: System Bootstrap", function () {
     it("should deploy all contracts successfully", async function () {
-      const { registry, nexoidModule, allowanceModule, usdc } =
+      const { registry, nexoidModule, allowanceModule, usdt } =
         await loadFixture(deployFullSystemFixture);
 
       expect(await registry.getAddress()).to.be.properAddress;
       expect(await nexoidModule.getAddress()).to.be.properAddress;
       expect(await allowanceModule.getAddress()).to.be.properAddress;
-      expect(await usdc.getAddress()).to.be.properAddress;
+      expect(await usdt.getAddress()).to.be.properAddress;
     });
 
     it("should set admin as deployer", async function () {
@@ -139,10 +139,10 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
       expect(await registry.isRegistrar(registrar.address)).to.be.true;
     });
 
-    it("should fund operator (Safe) with USDC", async function () {
-      const { usdc, operator, SAFE_BALANCE } = await loadFixture(deployFullSystemFixture);
+    it("should fund operator (Safe) with USDT", async function () {
+      const { usdt, operator, SAFE_BALANCE } = await loadFixture(deployFullSystemFixture);
 
-      expect(await usdc.balanceOf(operator.address)).to.equal(SAFE_BALANCE);
+      expect(await usdt.balanceOf(operator.address)).to.equal(SAFE_BALANCE);
     });
   });
 
@@ -602,23 +602,23 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
       expect(delegates).to.include(agent1.address);
     });
 
-    it("should set USDC allowance for agent", async function () {
-      const { allowanceModule, usdc, operator, agent1 } =
+    it("should set USDT allowance for agent", async function () {
+      const { allowanceModule, usdt, operator, agent1 } =
         await loadFixture(registeredAgentsFixture);
 
       await allowanceModule.connect(operator).addDelegate(agent1.address);
 
-      const allowanceAmount = toUSDC(100n); // 100 USDC
+      const allowanceAmount = toUSDT(100n); // 100 USDT
       await expect(
         allowanceModule.connect(operator).setAllowance(
-          agent1.address, await usdc.getAddress(), allowanceAmount, 0, 0
+          agent1.address, await usdt.getAddress(), allowanceAmount, 0, 0
         )
       )
         .to.emit(allowanceModule, "SetAllowance")
-        .withArgs(operator.address, agent1.address, await usdc.getAddress(), allowanceAmount, 0);
+        .withArgs(operator.address, agent1.address, await usdt.getAddress(), allowanceAmount, 0);
 
       const result = await allowanceModule.getTokenAllowance(
-        operator.address, agent1.address, await usdc.getAddress()
+        operator.address, agent1.address, await usdt.getAddress()
       );
       expect(result[0]).to.equal(allowanceAmount); // amount
       expect(result[1]).to.equal(0);                // spent
@@ -626,71 +626,71 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
     });
 
     it("should set different allowances for different agents", async function () {
-      const { allowanceModule, usdc, operator, agent1, agent2 } =
+      const { allowanceModule, usdt, operator, agent1, agent2 } =
         await loadFixture(registeredAgentsFixture);
 
       await allowanceModule.connect(operator).addDelegate(agent1.address);
       await allowanceModule.connect(operator).addDelegate(agent2.address);
 
       await allowanceModule.connect(operator).setAllowance(
-        agent1.address, await usdc.getAddress(), toUSDC(100n), 0, 0
+        agent1.address, await usdt.getAddress(), toUSDT(100n), 0, 0
       );
       await allowanceModule.connect(operator).setAllowance(
-        agent2.address, await usdc.getAddress(), toUSDC(500n), 1440, 0 // daily reset
+        agent2.address, await usdt.getAddress(), toUSDT(500n), 1440, 0 // daily reset
       );
 
       const result1 = await allowanceModule.getTokenAllowance(
-        operator.address, agent1.address, await usdc.getAddress()
+        operator.address, agent1.address, await usdt.getAddress()
       );
       const result2 = await allowanceModule.getTokenAllowance(
-        operator.address, agent2.address, await usdc.getAddress()
+        operator.address, agent2.address, await usdt.getAddress()
       );
 
-      expect(result1[0]).to.equal(toUSDC(100n));
-      expect(result2[0]).to.equal(toUSDC(500n));
+      expect(result1[0]).to.equal(toUSDT(100n));
+      expect(result2[0]).to.equal(toUSDT(500n));
       expect(result2[2]).to.equal(1440); // reset time in minutes (daily)
     });
 
     it("should update an existing allowance", async function () {
-      const { allowanceModule, usdc, operator, agent1 } =
+      const { allowanceModule, usdt, operator, agent1 } =
         await loadFixture(registeredAgentsFixture);
 
       await allowanceModule.connect(operator).addDelegate(agent1.address);
       await allowanceModule.connect(operator).setAllowance(
-        agent1.address, await usdc.getAddress(), toUSDC(100n), 0, 0
+        agent1.address, await usdt.getAddress(), toUSDT(100n), 0, 0
       );
 
-      // Increase to 500 USDC
+      // Increase to 500 USDT
       await allowanceModule.connect(operator).setAllowance(
-        agent1.address, await usdc.getAddress(), toUSDC(500n), 0, 0
+        agent1.address, await usdt.getAddress(), toUSDT(500n), 0, 0
       );
 
       const result = await allowanceModule.getTokenAllowance(
-        operator.address, agent1.address, await usdc.getAddress()
+        operator.address, agent1.address, await usdt.getAddress()
       );
-      expect(result[0]).to.equal(toUSDC(500n));
+      expect(result[0]).to.equal(toUSDT(500n));
     });
 
     it("should reject allowance for non-delegate", async function () {
-      const { allowanceModule, usdc, operator, stranger } =
+      const { allowanceModule, usdt, operator, stranger } =
         await loadFixture(registeredAgentsFixture);
 
       await expect(
         allowanceModule.connect(operator).setAllowance(
-          stranger.address, await usdc.getAddress(), toUSDC(100n), 0, 0
+          stranger.address, await usdt.getAddress(), toUSDT(100n), 0, 0
         )
       ).to.be.revertedWith("Not a delegate");
     });
   });
 
   // ═══════════════════════════════════════════════════════════════
-  // PHASE 6: Agent Sends USDC (Within Allowance)
+  // PHASE 6: Agent Sends USDT (Within Allowance)
   // ═══════════════════════════════════════════════════════════════
 
-  describe("Phase 6: Agent USDC Transfers", function () {
+  describe("Phase 6: Agent USDT Transfers", function () {
     async function fundedAgentFixture() {
       const fixture = await loadFixture(deployFullSystemFixture);
-      const { registry, nexoidModule, allowanceModule, usdc, registrar, operator, agent1, agent2, operatorMeta, agentMeta, credentialHash, scopeHash, futureTimestamp } = fixture;
+      const { registry, nexoidModule, allowanceModule, usdt, registrar, operator, agent1, agent2, operatorMeta, agentMeta, credentialHash, scopeHash, futureTimestamp } = fixture;
 
       // Register operator, create agents
       await registry.connect(registrar).registerIdentityFor(
@@ -711,29 +711,29 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
         agent2.address, agent2.address, scopeHash, credentialHash, futureTimestamp
       );
 
-      // Set allowances: agent1=100 USDC, agent2=200 USDC
+      // Set allowances: agent1=100 USDT, agent2=200 USDT
       await allowanceModule.connect(operator).addDelegate(agent1.address);
       await allowanceModule.connect(operator).addDelegate(agent2.address);
       await allowanceModule.connect(operator).setAllowance(
-        agent1.address, await usdc.getAddress(), toUSDC(100n), 0, 0
+        agent1.address, await usdt.getAddress(), toUSDT(100n), 0, 0
       );
       await allowanceModule.connect(operator).setAllowance(
-        agent2.address, await usdc.getAddress(), toUSDC(200n), 0, 0
+        agent2.address, await usdt.getAddress(), toUSDT(200n), 0, 0
       );
 
       return fixture;
     }
 
-    it("should allow agent to send USDC within allowance", async function () {
-      const { allowanceModule, usdc, operator, agent1, recipient } =
+    it("should allow agent to send USDT within allowance", async function () {
+      const { allowanceModule, usdt, operator, agent1, recipient } =
         await loadFixture(fundedAgentFixture);
 
-      const transferAmount = toUSDC(25n);
+      const transferAmount = toUSDT(25n);
 
       await expect(
         allowanceModule.connect(agent1).executeAllowanceTransfer(
           operator.address,
-          await usdc.getAddress(),
+          await usdt.getAddress(),
           recipient.address,
           transferAmount,
           hre.ethers.ZeroAddress,
@@ -743,75 +743,75 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
         )
       ).to.emit(allowanceModule, "ExecuteAllowanceTransfer");
 
-      // Verify recipient received USDC
-      expect(await usdc.balanceOf(recipient.address)).to.equal(transferAmount);
+      // Verify recipient received USDT
+      expect(await usdt.balanceOf(recipient.address)).to.equal(transferAmount);
 
       // Verify spent tracking
       const result = await allowanceModule.getTokenAllowance(
-        operator.address, agent1.address, await usdc.getAddress()
+        operator.address, agent1.address, await usdt.getAddress()
       );
       expect(result[1]).to.equal(transferAmount); // spent
       expect(result[4]).to.equal(1);              // nonce
     });
 
     it("should allow multiple transfers within allowance", async function () {
-      const { allowanceModule, usdc, operator, agent1, recipient } =
+      const { allowanceModule, usdt, operator, agent1, recipient } =
         await loadFixture(fundedAgentFixture);
 
-      // Transfer 1: 30 USDC
+      // Transfer 1: 30 USDT
       await allowanceModule.connect(agent1).executeAllowanceTransfer(
-        operator.address, await usdc.getAddress(), recipient.address,
-        toUSDC(30n), hre.ethers.ZeroAddress, 0, agent1.address, "0x"
+        operator.address, await usdt.getAddress(), recipient.address,
+        toUSDT(30n), hre.ethers.ZeroAddress, 0, agent1.address, "0x"
       );
 
-      // Transfer 2: 40 USDC
+      // Transfer 2: 40 USDT
       await allowanceModule.connect(agent1).executeAllowanceTransfer(
-        operator.address, await usdc.getAddress(), recipient.address,
-        toUSDC(40n), hre.ethers.ZeroAddress, 0, agent1.address, "0x"
+        operator.address, await usdt.getAddress(), recipient.address,
+        toUSDT(40n), hre.ethers.ZeroAddress, 0, agent1.address, "0x"
       );
 
-      // Transfer 3: 30 USDC (total = 100, exactly at limit)
+      // Transfer 3: 30 USDT (total = 100, exactly at limit)
       await allowanceModule.connect(agent1).executeAllowanceTransfer(
-        operator.address, await usdc.getAddress(), recipient.address,
-        toUSDC(30n), hre.ethers.ZeroAddress, 0, agent1.address, "0x"
+        operator.address, await usdt.getAddress(), recipient.address,
+        toUSDT(30n), hre.ethers.ZeroAddress, 0, agent1.address, "0x"
       );
 
-      expect(await usdc.balanceOf(recipient.address)).to.equal(toUSDC(100n));
+      expect(await usdt.balanceOf(recipient.address)).to.equal(toUSDT(100n));
 
       const result = await allowanceModule.getTokenAllowance(
-        operator.address, agent1.address, await usdc.getAddress()
+        operator.address, agent1.address, await usdt.getAddress()
       );
-      expect(result[1]).to.equal(toUSDC(100n)); // fully spent
+      expect(result[1]).to.equal(toUSDT(100n)); // fully spent
       expect(result[4]).to.equal(3);             // 3 transfers
     });
 
     it("should reject transfer exceeding allowance", async function () {
-      const { allowanceModule, usdc, operator, agent1, recipient } =
+      const { allowanceModule, usdt, operator, agent1, recipient } =
         await loadFixture(fundedAgentFixture);
 
       await expect(
         allowanceModule.connect(agent1).executeAllowanceTransfer(
-          operator.address, await usdc.getAddress(), recipient.address,
-          toUSDC(101n), // 101 > 100 allowance
+          operator.address, await usdt.getAddress(), recipient.address,
+          toUSDT(101n), // 101 > 100 allowance
           hre.ethers.ZeroAddress, 0, agent1.address, "0x"
         )
       ).to.be.revertedWith("Allowance exceeded");
     });
 
     it("should reject transfer after allowance is fully spent", async function () {
-      const { allowanceModule, usdc, operator, agent1, recipient } =
+      const { allowanceModule, usdt, operator, agent1, recipient } =
         await loadFixture(fundedAgentFixture);
 
-      // Spend full 100 USDC allowance
+      // Spend full 100 USDT allowance
       await allowanceModule.connect(agent1).executeAllowanceTransfer(
-        operator.address, await usdc.getAddress(), recipient.address,
-        toUSDC(100n), hre.ethers.ZeroAddress, 0, agent1.address, "0x"
+        operator.address, await usdt.getAddress(), recipient.address,
+        toUSDT(100n), hre.ethers.ZeroAddress, 0, agent1.address, "0x"
       );
 
       // Any additional transfer should fail
       await expect(
         allowanceModule.connect(agent1).executeAllowanceTransfer(
-          operator.address, await usdc.getAddress(), recipient.address,
+          operator.address, await usdt.getAddress(), recipient.address,
           1n, // even 1 wei
           hre.ethers.ZeroAddress, 0, agent1.address, "0x"
         )
@@ -819,32 +819,32 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
     });
 
     it("should enforce independent allowances per agent", async function () {
-      const { allowanceModule, usdc, operator, agent1, agent2, recipient } =
+      const { allowanceModule, usdt, operator, agent1, agent2, recipient } =
         await loadFixture(fundedAgentFixture);
 
       // Agent1 spends 80 out of 100
       await allowanceModule.connect(agent1).executeAllowanceTransfer(
-        operator.address, await usdc.getAddress(), recipient.address,
-        toUSDC(80n), hre.ethers.ZeroAddress, 0, agent1.address, "0x"
+        operator.address, await usdt.getAddress(), recipient.address,
+        toUSDT(80n), hre.ethers.ZeroAddress, 0, agent1.address, "0x"
       );
 
       // Agent2 can still spend up to 200 (independent)
       await allowanceModule.connect(agent2).executeAllowanceTransfer(
-        operator.address, await usdc.getAddress(), recipient.address,
-        toUSDC(150n), hre.ethers.ZeroAddress, 0, agent2.address, "0x"
+        operator.address, await usdt.getAddress(), recipient.address,
+        toUSDT(150n), hre.ethers.ZeroAddress, 0, agent2.address, "0x"
       );
 
-      expect(await usdc.balanceOf(recipient.address)).to.equal(toUSDC(230n));
+      expect(await usdt.balanceOf(recipient.address)).to.equal(toUSDT(230n));
     });
 
     it("should reject transfer from non-delegate caller", async function () {
-      const { allowanceModule, usdc, operator, agent1, stranger, recipient } =
+      const { allowanceModule, usdt, operator, agent1, stranger, recipient } =
         await loadFixture(fundedAgentFixture);
 
       await expect(
         allowanceModule.connect(stranger).executeAllowanceTransfer(
-          operator.address, await usdc.getAddress(), recipient.address,
-          toUSDC(10n), hre.ethers.ZeroAddress, 0, agent1.address, "0x"
+          operator.address, await usdt.getAddress(), recipient.address,
+          toUSDT(10n), hre.ethers.ZeroAddress, 0, agent1.address, "0x"
         )
       ).to.be.revertedWith("Caller must be delegate");
     });
@@ -1022,7 +1022,7 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
   describe("Phase 8: Complete End-to-End Workflow", function () {
     it("should execute the full operator -> agent -> payment workflow", async function () {
       const {
-        registry, nexoidModule, allowanceModule, usdc,
+        registry, nexoidModule, allowanceModule, usdt,
         admin, registrar, operator, agent1, recipient,
         operatorMeta, agentMeta, credentialHash, scopeHash, futureTimestamp,
       } = await loadFixture(deployFullSystemFixture);
@@ -1049,48 +1049,48 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
       );
       expect(await nexoidModule.isValidAgent(agent1.address)).to.be.true;
 
-      // --- Step 5: Operator sets USDC allowance for agent ---
+      // --- Step 5: Operator sets USDT allowance for agent ---
       await allowanceModule.connect(operator).addDelegate(agent1.address);
       await allowanceModule.connect(operator).setAllowance(
-        agent1.address, await usdc.getAddress(), toUSDC(100n), 0, 0
+        agent1.address, await usdt.getAddress(), toUSDT(100n), 0, 0
       );
 
-      // --- Step 6: Agent sends USDC to recipient ---
+      // --- Step 6: Agent sends USDT to recipient ---
       await allowanceModule.connect(agent1).executeAllowanceTransfer(
-        operator.address, await usdc.getAddress(), recipient.address,
-        toUSDC(50n), hre.ethers.ZeroAddress, 0, agent1.address, "0x"
+        operator.address, await usdt.getAddress(), recipient.address,
+        toUSDT(50n), hre.ethers.ZeroAddress, 0, agent1.address, "0x"
       );
 
-      expect(await usdc.balanceOf(recipient.address)).to.equal(toUSDC(50n));
+      expect(await usdt.balanceOf(recipient.address)).to.equal(toUSDT(50n));
 
       // --- Step 7: Verify remaining allowance ---
       const allowanceResult = await allowanceModule.getTokenAllowance(
-        operator.address, agent1.address, await usdc.getAddress()
+        operator.address, agent1.address, await usdt.getAddress()
       );
-      expect(allowanceResult[0]).to.equal(toUSDC(100n)); // total
-      expect(allowanceResult[1]).to.equal(toUSDC(50n));  // spent
-      // remaining = 100 - 50 = 50 USDC
+      expect(allowanceResult[0]).to.equal(toUSDT(100n)); // total
+      expect(allowanceResult[1]).to.equal(toUSDT(50n));  // spent
+      // remaining = 100 - 50 = 50 USDT
 
       // --- Step 8: Agent tries to exceed remaining allowance ---
       await expect(
         allowanceModule.connect(agent1).executeAllowanceTransfer(
-          operator.address, await usdc.getAddress(), recipient.address,
-          toUSDC(51n), hre.ethers.ZeroAddress, 0, agent1.address, "0x"
+          operator.address, await usdt.getAddress(), recipient.address,
+          toUSDT(51n), hre.ethers.ZeroAddress, 0, agent1.address, "0x"
         )
       ).to.be.revertedWith("Allowance exceeded");
 
-      // --- Step 9: Agent sends exactly remaining (50 USDC) ---
+      // --- Step 9: Agent sends exactly remaining (50 USDT) ---
       await allowanceModule.connect(agent1).executeAllowanceTransfer(
-        operator.address, await usdc.getAddress(), recipient.address,
-        toUSDC(50n), hre.ethers.ZeroAddress, 0, agent1.address, "0x"
+        operator.address, await usdt.getAddress(), recipient.address,
+        toUSDT(50n), hre.ethers.ZeroAddress, 0, agent1.address, "0x"
       );
 
-      expect(await usdc.balanceOf(recipient.address)).to.equal(toUSDC(100n));
+      expect(await usdt.balanceOf(recipient.address)).to.equal(toUSDT(100n));
     });
 
     it("should support multi-agent fleet with independent controls", async function () {
       const {
-        registry, nexoidModule, allowanceModule, usdc,
+        registry, nexoidModule, allowanceModule, usdt,
         registrar, operator, agent1, agent2, agent3, recipient,
         operatorMeta, agentMeta, credentialHash, futureTimestamp,
       } = await loadFixture(deployFullSystemFixture);
@@ -1132,30 +1132,30 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
       await allowanceModule.connect(operator).addDelegate(agent3.address);
 
       await allowanceModule.connect(operator).setAllowance(
-        agent1.address, await usdc.getAddress(), toUSDC(1000n), 0, 0
+        agent1.address, await usdt.getAddress(), toUSDT(1000n), 0, 0
       );
       await allowanceModule.connect(operator).setAllowance(
-        agent2.address, await usdc.getAddress(), toUSDC(500n), 0, 0
+        agent2.address, await usdt.getAddress(), toUSDT(500n), 0, 0
       );
       await allowanceModule.connect(operator).setAllowance(
-        agent3.address, await usdc.getAddress(), toUSDC(200n), 0, 0
+        agent3.address, await usdt.getAddress(), toUSDT(200n), 0, 0
       );
 
       // All agents transfer independently
       await allowanceModule.connect(agent1).executeAllowanceTransfer(
-        operator.address, await usdc.getAddress(), recipient.address,
-        toUSDC(100n), hre.ethers.ZeroAddress, 0, agent1.address, "0x"
+        operator.address, await usdt.getAddress(), recipient.address,
+        toUSDT(100n), hre.ethers.ZeroAddress, 0, agent1.address, "0x"
       );
       await allowanceModule.connect(agent2).executeAllowanceTransfer(
-        operator.address, await usdc.getAddress(), recipient.address,
-        toUSDC(200n), hre.ethers.ZeroAddress, 0, agent2.address, "0x"
+        operator.address, await usdt.getAddress(), recipient.address,
+        toUSDT(200n), hre.ethers.ZeroAddress, 0, agent2.address, "0x"
       );
       await allowanceModule.connect(agent3).executeAllowanceTransfer(
-        operator.address, await usdc.getAddress(), recipient.address,
-        toUSDC(150n), hre.ethers.ZeroAddress, 0, agent3.address, "0x"
+        operator.address, await usdt.getAddress(), recipient.address,
+        toUSDT(150n), hre.ethers.ZeroAddress, 0, agent3.address, "0x"
       );
 
-      expect(await usdc.balanceOf(recipient.address)).to.equal(toUSDC(450n));
+      expect(await usdt.balanceOf(recipient.address)).to.equal(toUSDT(450n));
 
       // Verify all delegates are listed
       const [delegates] = await allowanceModule.getDelegates(operator.address, 0, 50);
@@ -1267,7 +1267,7 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
   describe("Phase 10: Security Boundaries", function () {
     async function securityFixture() {
       const fixture = await loadFixture(deployFullSystemFixture);
-      const { registry, nexoidModule, allowanceModule, usdc, registrar, operator, agent1, agent2, subAgent, operatorMeta, agentMeta, credentialHash, scopeHash, futureTimestamp } = fixture;
+      const { registry, nexoidModule, allowanceModule, usdt, registrar, operator, agent1, agent2, subAgent, operatorMeta, agentMeta, credentialHash, scopeHash, futureTimestamp } = fixture;
 
       await registry.connect(registrar).registerIdentityFor(
         operator.address, EntityType.Human, operatorMeta
@@ -1287,49 +1287,49 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
         agent1.address, agent1.address, scopeHash, credentialHash, futureTimestamp
       );
 
-      // Allowance for agent1: 100 USDC
+      // Allowance for agent1: 100 USDT
       await allowanceModule.connect(operator).addDelegate(agent1.address);
       await allowanceModule.connect(operator).setAllowance(
-        agent1.address, await usdc.getAddress(), toUSDC(100n), 0, 0
+        agent1.address, await usdt.getAddress(), toUSDT(100n), 0, 0
       );
 
       return fixture;
     }
 
     it("agent cannot escalate its own allowance", async function () {
-      const { allowanceModule, usdc, operator, agent1 } =
+      const { allowanceModule, usdt, operator, agent1 } =
         await loadFixture(securityFixture);
 
       // Agent tries to set its own allowance (msg.sender = agent1 acting as Safe)
       // This would create a different mapping entry (agent1 as safe, not operator as safe)
       await allowanceModule.connect(agent1).addDelegate(agent1.address);
       await allowanceModule.connect(agent1).setAllowance(
-        agent1.address, await usdc.getAddress(), toUSDC(999999n), 0, 0
+        agent1.address, await usdt.getAddress(), toUSDT(999999n), 0, 0
       );
 
       // But the allowance is under agent1's safe mapping, not operator's
-      // Agent1 still only has 100 USDC under operator's safe
+      // Agent1 still only has 100 USDT under operator's safe
       const operatorResult = await allowanceModule.getTokenAllowance(
-        operator.address, agent1.address, await usdc.getAddress()
+        operator.address, agent1.address, await usdt.getAddress()
       );
-      expect(operatorResult[0]).to.equal(toUSDC(100n));
+      expect(operatorResult[0]).to.equal(toUSDT(100n));
     });
 
     it("agent cannot spend from another agent's allowance", async function () {
-      const { allowanceModule, usdc, operator, agent1, agent2, recipient } =
+      const { allowanceModule, usdt, operator, agent1, agent2, recipient } =
         await loadFixture(securityFixture);
 
       // Agent2 is not a delegate on operator's AllowanceModule
       await expect(
         allowanceModule.connect(agent2).executeAllowanceTransfer(
-          operator.address, await usdc.getAddress(), recipient.address,
-          toUSDC(10n), hre.ethers.ZeroAddress, 0, agent2.address, "0x"
+          operator.address, await usdt.getAddress(), recipient.address,
+          toUSDT(10n), hre.ethers.ZeroAddress, 0, agent2.address, "0x"
         )
       ).to.be.revertedWith("No allowance set");
     });
 
     it("NexoidModule registration does not grant spending — allowance is the hard ceiling", async function () {
-      const { nexoidModule, allowanceModule, usdc, operator, agent2, recipient, credentialHash, scopeHash, futureTimestamp } =
+      const { nexoidModule, allowanceModule, usdt, operator, agent2, recipient, credentialHash, scopeHash, futureTimestamp } =
         await loadFixture(securityFixture);
 
       // Register agent2 via NexoidModule (has scope but no allowance)
@@ -1343,8 +1343,8 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
       // But agent2 cannot spend (no allowance set on AllowanceModule)
       await expect(
         allowanceModule.connect(agent2).executeAllowanceTransfer(
-          operator.address, await usdc.getAddress(), recipient.address,
-          toUSDC(1n), hre.ethers.ZeroAddress, 0, agent2.address, "0x"
+          operator.address, await usdt.getAddress(), recipient.address,
+          toUSDT(1n), hre.ethers.ZeroAddress, 0, agent2.address, "0x"
         )
       ).to.be.revertedWith("No allowance set");
     });
@@ -1412,13 +1412,13 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
     });
 
     it("delegate removal prevents future transfers", async function () {
-      const { allowanceModule, usdc, operator, agent1, recipient } =
+      const { allowanceModule, usdt, operator, agent1, recipient } =
         await loadFixture(securityFixture);
 
       // Agent1 can transfer initially
       await allowanceModule.connect(agent1).executeAllowanceTransfer(
-        operator.address, await usdc.getAddress(), recipient.address,
-        toUSDC(10n), hre.ethers.ZeroAddress, 0, agent1.address, "0x"
+        operator.address, await usdt.getAddress(), recipient.address,
+        toUSDT(10n), hre.ethers.ZeroAddress, 0, agent1.address, "0x"
       );
 
       // Remove delegate
@@ -1427,14 +1427,14 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
       // Agent can no longer transfer
       await expect(
         allowanceModule.connect(agent1).executeAllowanceTransfer(
-          operator.address, await usdc.getAddress(), recipient.address,
-          toUSDC(10n), hre.ethers.ZeroAddress, 0, agent1.address, "0x"
+          operator.address, await usdt.getAddress(), recipient.address,
+          toUSDT(10n), hre.ethers.ZeroAddress, 0, agent1.address, "0x"
         )
       ).to.be.revertedWith("No allowance set");
     });
 
     it("operator can remove and re-add delegate (fresh allowance)", async function () {
-      const { allowanceModule, usdc, operator, agent1 } =
+      const { allowanceModule, usdt, operator, agent1 } =
         await loadFixture(securityFixture);
 
       // Remove delegate (clears allowances)
@@ -1445,19 +1445,19 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
 
       // Old allowance should be gone
       const result = await allowanceModule.getTokenAllowance(
-        operator.address, agent1.address, await usdc.getAddress()
+        operator.address, agent1.address, await usdt.getAddress()
       );
       expect(result[0]).to.equal(0);
 
       // Set new allowance
       await allowanceModule.connect(operator).setAllowance(
-        agent1.address, await usdc.getAddress(), toUSDC(50n), 0, 0
+        agent1.address, await usdt.getAddress(), toUSDT(50n), 0, 0
       );
 
       const newResult = await allowanceModule.getTokenAllowance(
-        operator.address, agent1.address, await usdc.getAddress()
+        operator.address, agent1.address, await usdt.getAddress()
       );
-      expect(newResult[0]).to.equal(toUSDC(50n));
+      expect(newResult[0]).to.equal(toUSDT(50n));
     });
   });
 
@@ -1468,15 +1468,15 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
   describe("Phase 11: Organization Workflow", function () {
     it("should support full Organization -> Agent workflow", async function () {
       const {
-        registry, nexoidModule, allowanceModule, usdc,
+        registry, nexoidModule, allowanceModule, usdt,
         registrar, operator2, agent1, recipient,
         operatorMeta, agentMeta, credentialHash, scopeHash, futureTimestamp,
       } = await loadFixture(deployFullSystemFixture);
 
-      // Mint USDC to org (simulated Safe)
-      await usdc.mint(operator2.address, toUSDC(10000n));
-      await usdc.connect(operator2).approve(
-        await allowanceModule.getAddress(), toUSDC(10000n)
+      // Mint USDT to org (simulated Safe)
+      await usdt.mint(operator2.address, toUSDT(10000n));
+      await usdt.connect(operator2).approve(
+        await allowanceModule.getAddress(), toUSDT(10000n)
       );
 
       // Register as Organization
@@ -1502,16 +1502,16 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
       // Org sets allowance
       await allowanceModule.connect(operator2).addDelegate(agent1.address);
       await allowanceModule.connect(operator2).setAllowance(
-        agent1.address, await usdc.getAddress(), toUSDC(500n), 0, 0
+        agent1.address, await usdt.getAddress(), toUSDT(500n), 0, 0
       );
 
       // Agent sends
       await allowanceModule.connect(agent1).executeAllowanceTransfer(
-        operator2.address, await usdc.getAddress(), recipient.address,
-        toUSDC(100n), hre.ethers.ZeroAddress, 0, agent1.address, "0x"
+        operator2.address, await usdt.getAddress(), recipient.address,
+        toUSDT(100n), hre.ethers.ZeroAddress, 0, agent1.address, "0x"
       );
 
-      expect(await usdc.balanceOf(recipient.address)).to.equal(toUSDC(100n));
+      expect(await usdt.balanceOf(recipient.address)).to.equal(toUSDT(100n));
     });
   });
 
@@ -1521,48 +1521,48 @@ describe("E2E Workflow: Full Operator & Agent Lifecycle", function () {
 
   describe("Phase 12: Transfer Hash Generation", function () {
     it("should generate deterministic transfer hashes", async function () {
-      const { allowanceModule, usdc, operator, recipient } =
+      const { allowanceModule, usdt, operator, recipient } =
         await loadFixture(deployFullSystemFixture);
 
       const hash1 = await allowanceModule.generateTransferHash(
-        operator.address, await usdc.getAddress(), recipient.address,
-        toUSDC(100n), hre.ethers.ZeroAddress, 0, 0
+        operator.address, await usdt.getAddress(), recipient.address,
+        toUSDT(100n), hre.ethers.ZeroAddress, 0, 0
       );
       const hash2 = await allowanceModule.generateTransferHash(
-        operator.address, await usdc.getAddress(), recipient.address,
-        toUSDC(100n), hre.ethers.ZeroAddress, 0, 0
+        operator.address, await usdt.getAddress(), recipient.address,
+        toUSDT(100n), hre.ethers.ZeroAddress, 0, 0
       );
 
       expect(hash1).to.equal(hash2);
     });
 
     it("should produce different hashes for different amounts", async function () {
-      const { allowanceModule, usdc, operator, recipient } =
+      const { allowanceModule, usdt, operator, recipient } =
         await loadFixture(deployFullSystemFixture);
 
       const hash100 = await allowanceModule.generateTransferHash(
-        operator.address, await usdc.getAddress(), recipient.address,
-        toUSDC(100n), hre.ethers.ZeroAddress, 0, 0
+        operator.address, await usdt.getAddress(), recipient.address,
+        toUSDT(100n), hre.ethers.ZeroAddress, 0, 0
       );
       const hash200 = await allowanceModule.generateTransferHash(
-        operator.address, await usdc.getAddress(), recipient.address,
-        toUSDC(200n), hre.ethers.ZeroAddress, 0, 0
+        operator.address, await usdt.getAddress(), recipient.address,
+        toUSDT(200n), hre.ethers.ZeroAddress, 0, 0
       );
 
       expect(hash100).to.not.equal(hash200);
     });
 
     it("should produce different hashes for different nonces", async function () {
-      const { allowanceModule, usdc, operator, recipient } =
+      const { allowanceModule, usdt, operator, recipient } =
         await loadFixture(deployFullSystemFixture);
 
       const hashNonce0 = await allowanceModule.generateTransferHash(
-        operator.address, await usdc.getAddress(), recipient.address,
-        toUSDC(100n), hre.ethers.ZeroAddress, 0, 0
+        operator.address, await usdt.getAddress(), recipient.address,
+        toUSDT(100n), hre.ethers.ZeroAddress, 0, 0
       );
       const hashNonce1 = await allowanceModule.generateTransferHash(
-        operator.address, await usdc.getAddress(), recipient.address,
-        toUSDC(100n), hre.ethers.ZeroAddress, 0, 1
+        operator.address, await usdt.getAddress(), recipient.address,
+        toUSDT(100n), hre.ethers.ZeroAddress, 0, 1
       );
 
       expect(hashNonce0).to.not.equal(hashNonce1);

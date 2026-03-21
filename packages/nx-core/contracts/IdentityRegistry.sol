@@ -10,7 +10,7 @@ import "./interfaces/IIdentityRegistry.sol";
  *      registrar (Nexoid backend) after identity verification. Self-registration
  *      is not permitted — all identities must go through the registrar flow.
  *      Agents are created by registered operators.
- *      DID format: did:nexoid:base:<address>
+ *      DID format: did:nexoid:eth:<address>
  */
 contract IdentityRegistry is IIdentityRegistry {
     mapping(address => IdentityRecord) private _identities;
