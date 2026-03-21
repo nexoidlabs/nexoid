@@ -47,8 +47,8 @@ export default function RootLayout({
                   </div>
                 </div>
                 <div className="topbar-right">
-                  <NetworkSelector />
                   <ThemeToggle />
+                  <NetworkSelector />
                   <WalletButton />
                 </div>
               </header>

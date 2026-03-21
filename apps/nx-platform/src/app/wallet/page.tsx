@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
+import { useWallet } from "@/lib/wallet";
+import { getSafeAddress } from "@/lib/storage";
 
 interface AgentAllowance {
   address: string;
@@ -36,31 +38,34 @@ interface WalletData {
 }
 
 export default function WalletPage() {
-  const [safeAddress, setSafeAddress] = useState(
-    () => (typeof window !== "undefined" && localStorage.getItem("nexoid_safe_address")) || ""
-  );
+  const { address: walletAddress } = useWallet();
   const [data, setData] = useState<WalletData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const fetchWallet = useCallback(async (address?: string) => {
-    const addr = address ?? safeAddress;
-    if (!addr) return;
+  const fetchWallet = useCallback(async (safeAddr: string, eoa?: string) => {
+    if (!safeAddr) return;
     setLoading(true);
     setError("");
     try {
-      const res = await fetch(`/api/wallet?safe=${addr}&type=operator`);
+      let url = `/api/wallet?safe=${safeAddr}&type=operator`;
+      if (eoa) url += `&eoa=${eoa}`;
+      const res = await fetch(url);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to fetch");
       setData(json);
-      localStorage.setItem("nexoid_safe_address", addr);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
       setData(null);
     } finally {
       setLoading(false);
     }
-  }, [safeAddress]);
+  }, []);
+
+  useEffect(() => {
+    const stored = getSafeAddress();
+    if (stored) fetchWallet(stored, walletAddress ?? undefined);
+  }, [fetchWallet, walletAddress]);
 
   const formatResetPeriod = (minutes: number) => {
     if (minutes === 0) return "No reset";
@@ -82,15 +87,15 @@ export default function WalletPage() {
     return (
       <div key={agent.address} className="card" style={{ padding: 20 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-          <div>
+          <div style={{ minWidth: 0, flex: 1 }}>
             <div className="mono" style={{ fontSize: 13 }}>
               {agent.address.slice(0, 6)}...{agent.address.slice(-4)}
             </div>
-            <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>
-              {agent.did}
+            <div className="mono" style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              did:nexoid:eth:{agent.address.slice(0, 8)}...{agent.address.slice(-4)}
             </div>
           </div>
-          <span className={`badge ${isExhausted ? "badge-revoked" : "badge-active"}`}>
+          <span className={`badge ${isExhausted ? "badge-revoked" : "badge-active"}`} style={{ flexShrink: 0, marginLeft: 8 }}>
             {isExhausted ? "Exhausted" : "Active"}
           </span>
         </div>
@@ -128,27 +133,12 @@ export default function WalletPage() {
     );
   };
 
+  if (loading) return <div className="loading">Loading wallet data...</div>;
+
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
         <h2 style={{ fontSize: 18, fontWeight: 700 }}>Wallet & Allowances</h2>
-      </div>
-
-      {/* Safe address input */}
-      <div className="card" style={{ marginBottom: 24 }}>
-        <div style={{ display: "flex", gap: 12 }}>
-          <input
-            type="text"
-            placeholder="Safe address (0x...)"
-            value={safeAddress}
-            onChange={(e) => setSafeAddress(e.target.value)}
-            style={{ flex: 1 }}
-            className="mono"
-          />
-          <button className="btn btn-primary" onClick={() => fetchWallet()} disabled={loading || !safeAddress}>
-            {loading ? "Loading..." : "Load Wallet"}
-          </button>
-        </div>
       </div>
 
       {error && <div className="error-msg">{error}</div>}
@@ -178,8 +168,8 @@ export default function WalletPage() {
             </div>
             <div className="stat-card">
               <div className="label">Operator Safe</div>
-              <div className="mono" style={{ fontSize: 13, wordBreak: "break-all", marginTop: 8 }}>
-                {data.safe}
+              <div className="mono" style={{ fontSize: 13, marginTop: 8 }}>
+                {data.safe.slice(0, 6)}...{data.safe.slice(-4)}
               </div>
             </div>
           </div>
@@ -192,9 +182,9 @@ export default function WalletPage() {
                 {data.agentSafes.map((agentSafe) => (
                   <div key={agentSafe.agentSafe} className="card" style={{ padding: 20 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-                      <div>
-                        <div style={{ fontSize: 13, fontWeight: 600 }}>
-                          {agentSafe.did}
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div className="mono" style={{ fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {agentSafe.did.replace(/^(did:nexoid:eth:0x[a-fA-F0-9]{8}).*([a-fA-F0-9]{4})$/, "$1...$2")}
                         </div>
                         <div className="mono" style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>
                           Safe: {agentSafe.agentSafe.slice(0, 6)}...{agentSafe.agentSafe.slice(-4)}
@@ -203,7 +193,7 @@ export default function WalletPage() {
                           EOA: {agentSafe.agentEOA.slice(0, 6)}...{agentSafe.agentEOA.slice(-4)}
                         </div>
                       </div>
-                      <span className="badge badge-active">Active</span>
+                      <span className="badge badge-active" style={{ flexShrink: 0, marginLeft: 8 }}>Active</span>
                     </div>
                     <div style={{ display: "flex", gap: 16, fontSize: 13, marginBottom: 12 }}>
                       <span>
@@ -230,10 +220,10 @@ export default function WalletPage() {
             </>
           )}
 
-          {/* Legacy: Agent allowance cards (delegates on operator Safe) */}
+          {/* Allowances set directly on the operator Safe (legacy or direct grants) */}
           {data.agents.length > 0 && (
             <>
-              <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>Operator Safe Delegates</h3>
+              <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>Direct Allowances</h3>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(360px, 1fr))", gap: 16 }}>
                 {data.agents.map(renderAllowanceBar)}
               </div>
@@ -251,8 +241,8 @@ export default function WalletPage() {
 
       {!data && !loading && !error && (
         <div className="empty-state">
-          <h3>Enter a Safe address</h3>
-          <p>Enter your Safe{"{Wallet}"} address above to view balances and agent allowances.</p>
+          <h3>No Safe configured</h3>
+          <p>Go to <a href="/settings" style={{ color: "var(--accent)" }}>Settings</a> to configure your Safe address, or complete <a href="/onboarding" style={{ color: "var(--accent)" }}>Setup</a> to deploy one.</p>
         </div>
       )}
     </div>

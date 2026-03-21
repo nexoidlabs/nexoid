@@ -102,6 +102,7 @@ async function fetchDelegateAllowances(
 
 export async function GET(request: NextRequest) {
   const safeAddress = request.nextUrl.searchParams.get("safe") as Address | null;
+  const eoaAddress = request.nextUrl.searchParams.get("eoa") as Address | null;
   const queryType = request.nextUrl.searchParams.get("type") ?? "operator";
 
   if (!safeAddress) {
@@ -129,42 +130,57 @@ export async function GET(request: NextRequest) {
     };
 
     // If operator mode and NexoidModule is configured, also fetch agent Safes
+    // Query both the Safe address and the EOA, since registerAgentSafe uses
+    // msg.sender (the EOA) as the operator key in the contract.
     if (queryType === "operator") {
       const nexoidModuleAddress = getNexoidModuleAddress();
       if (nexoidModuleAddress) {
-        try {
-          const agentSafes = await publicClient.readContract({
-            address: nexoidModuleAddress,
-            abi: NEXOID_MODULE_ABI,
-            functionName: "getAgentSafes",
-            args: [safeAddress],
-          }) as unknown as Array<{ agentSafe: Address; agentEOA: Address; createdAt: bigint; scopeHash: `0x${string}`; credentialHash: `0x${string}`; validUntil: bigint; status: number }>;
+        type AgentRecord = { agentSafe: Address; agentEOA: Address; createdAt: bigint; scopeHash: `0x${string}`; credentialHash: `0x${string}`; validUntil: bigint; status: number };
 
-          const agentSafeDetails = await Promise.all(
-            agentSafes.map(async (record) => {
-              const { ethBalance: agentEth, usdtBalance: agentUsdt } =
-                await fetchSafeBalances(publicClient, record.agentSafe, tokenAddress);
-              const agentDelegates = await fetchDelegateAllowances(
-                publicClient, record.agentSafe, tokenAddress
-              );
-              return {
-                agentSafe: record.agentSafe,
-                agentEOA: record.agentEOA,
-                createdAt: Number(record.createdAt),
-                did: `did:nexoid:eth:${record.agentEOA.toLowerCase()}`,
-                balances: {
-                  eth: formatUnits(agentEth, 18),
-                  usdt: formatUnits(agentUsdt, 6),
-                },
-                delegates: agentDelegates,
-              };
-            })
-          );
+        const allRecords: AgentRecord[] = [];
+        const seen = new Set<string>();
 
-          response.agentSafes = agentSafeDetails;
-        } catch {
-          response.agentSafes = [];
+        // Query with Safe address
+        for (const addr of [safeAddress, eoaAddress].filter(Boolean) as Address[]) {
+          if (seen.has(addr.toLowerCase())) continue;
+          seen.add(addr.toLowerCase());
+          try {
+            const records = await publicClient.readContract({
+              address: nexoidModuleAddress,
+              abi: NEXOID_MODULE_ABI,
+              functionName: "getAgentSafes",
+              args: [addr],
+            }) as unknown as AgentRecord[];
+            for (const r of records) {
+              if (!allRecords.some(e => e.agentSafe.toLowerCase() === r.agentSafe.toLowerCase())) {
+                allRecords.push(r);
+              }
+            }
+          } catch { /* no agents for this address */ }
         }
+
+        const agentSafeDetails = await Promise.all(
+          allRecords.map(async (record) => {
+            const { ethBalance: agentEth, usdtBalance: agentUsdt } =
+              await fetchSafeBalances(publicClient, record.agentSafe, tokenAddress);
+            const agentDelegates = await fetchDelegateAllowances(
+              publicClient, record.agentSafe, tokenAddress
+            );
+            return {
+              agentSafe: record.agentSafe,
+              agentEOA: record.agentEOA,
+              createdAt: Number(record.createdAt),
+              did: `did:nexoid:eth:${record.agentEOA.toLowerCase()}`,
+              balances: {
+                eth: formatUnits(agentEth, 18),
+                usdt: formatUnits(agentUsdt, 6),
+              },
+              delegates: agentDelegates,
+            };
+          })
+        );
+
+        response.agentSafes = agentSafeDetails;
       }
     }
 

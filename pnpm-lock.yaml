@@ -10,6 +10,12 @@ importers:
 
   apps/nx-platform:
     dependencies:
+      '@nexoid/core-client':
+        specifier: workspace:*
+        version: link:../../packages/core-client
+      ethers:
+        specifier: ^6.16.0
+        version: 6.16.0
       next:
         specifier: ^15.0.0
         version: 15.5.14(react-dom@19.2.4(react@19.2.4))(react@19.2.4)

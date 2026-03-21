@@ -64,25 +64,40 @@ export async function GET(request: Request) {
 
   // List all registered identities by scanning events
   try {
-    const logs = await client.getLogs({
-      address: registryAddress,
-      event: {
-        type: "event",
-        name: "IdentityRegistered",
-        inputs: [
-          { name: "identity", type: "address", indexed: true },
-          { name: "entityType", type: "uint8", indexed: false },
-          { name: "owner", type: "address", indexed: true },
-          { name: "metadataHash", type: "bytes32", indexed: false },
-        ],
-      },
-      fromBlock: 0n,
-      toBlock: "latest",
-    });
+    // Scan in chunks to respect RPC block range limits (typically 50k)
+    const CHUNK_SIZE = 49_000n;
+    const latestBlock = await client.getBlockNumber();
+    const deployBlock = process.env.REGISTRY_DEPLOY_BLOCK
+      ? BigInt(process.env.REGISTRY_DEPLOY_BLOCK)
+      : latestBlock > 200_000n ? latestBlock - 200_000n : 0n;
+
+    const eventDef = {
+      type: "event" as const,
+      name: "IdentityRegistered" as const,
+      inputs: [
+        { name: "identity", type: "address" as const, indexed: true },
+        { name: "entityType", type: "uint8" as const, indexed: false },
+        { name: "owner", type: "address" as const, indexed: true },
+        { name: "metadataHash", type: "bytes32" as const, indexed: false },
+      ],
+    };
+
+    const allLogs = [];
+    for (let from = deployBlock; from <= latestBlock; from += CHUNK_SIZE + 1n) {
+      const to = from + CHUNK_SIZE > latestBlock ? latestBlock : from + CHUNK_SIZE;
+      const chunk = await client.getLogs({
+        address: registryAddress,
+        event: eventDef,
+        fromBlock: from,
+        toBlock: to,
+      });
+      allLogs.push(...chunk);
+    }
+    const logs = allLogs;
 
     const identities = await Promise.all(
       logs.map(async (log) => {
-        const addr = log.args.identity!;
+        const addr = (log.args as Record<string, unknown>).identity as `0x${string}`;
         const record = await client.readContract({
           address: registryAddress,
           abi: IDENTITY_REGISTRY_ABI,

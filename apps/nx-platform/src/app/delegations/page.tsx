@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { useWallet } from "@/lib/wallet";
 import {
   getModuleAddress,
@@ -8,6 +8,7 @@ import {
   AGENT_STATUSES,
 } from "@/lib/contracts";
 import { keccak256, stringToHex } from "viem";
+import { getSafeAddress, getStoredAgents, type StoredAgent } from "@/lib/storage";
 
 interface AgentScope {
   agentSafe: string;
@@ -80,20 +81,44 @@ export default function DelegationsPage() {
   // Action target
   const [actionAddress, setActionAddress] = useState("");
 
+  // Local agents from storage
+  const [localAgents, setLocalAgents] = useState<StoredAgent[]>([]);
+
   const moduleAddress = getModuleAddress();
 
-  const loadAgents = () => {
+  const loadAgents = useCallback(async () => {
     setLoading(true);
-    fetch("/api/delegations")
-      .then((r) => r.json())
-      .then((data) => setAgents(data.agents ?? []))
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-  };
+    try {
+      const all: AgentScope[] = [];
+      const queried = new Set<string>();
+
+      const storedSafe = getSafeAddress();
+      if (storedSafe) {
+        queried.add(storedSafe.toLowerCase());
+        const res = await fetch(`/api/delegations?operator=${storedSafe}`);
+        const data = await res.json();
+        if (data.agents) all.push(...data.agents);
+      }
+
+      // Also query with EOA (registerAgentSafe uses msg.sender which is the EOA)
+      if (walletAddress && !queried.has(walletAddress.toLowerCase())) {
+        const res = await fetch(`/api/delegations?operator=${walletAddress}`);
+        const data = await res.json();
+        if (data.agents) all.push(...data.agents);
+      }
+
+      setAgents(all);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }, [walletAddress]);
 
   useEffect(() => {
     loadAgents();
-  }, []);
+    setLocalAgents(getStoredAgents());
+  }, [loadAgents]);
 
   const showSuccess = (msg: string) => {
     setSuccess(msg);
@@ -181,6 +206,7 @@ export default function DelegationsPage() {
         ],
         chain,
         account: walletAddress!,
+        gas: 500_000n,
       });
       await publicClient.waitForTransactionReceipt({ hash });
       showSuccess(`Agent scope updated. Tx: ${hash.slice(0, 10)}...`);
@@ -205,6 +231,7 @@ export default function DelegationsPage() {
         args: [actionAddress as `0x${string}`],
         chain,
         account: walletAddress!,
+        gas: 200_000n,
       });
       await publicClient.waitForTransactionReceipt({ hash });
       showSuccess(`Agent ${actionAddress.slice(0, 10)}... revoked. Tx: ${hash.slice(0, 10)}...`);
@@ -229,6 +256,7 @@ export default function DelegationsPage() {
         args: [actionAddress as `0x${string}`],
         chain,
         account: walletAddress!,
+        gas: 200_000n,
       });
       await publicClient.waitForTransactionReceipt({ hash });
       showSuccess(`Agent ${actionAddress.slice(0, 10)}... suspended. Tx: ${hash.slice(0, 10)}...`);
@@ -253,6 +281,7 @@ export default function DelegationsPage() {
         args: [actionAddress as `0x${string}`],
         chain,
         account: walletAddress!,
+        gas: 200_000n,
       });
       await publicClient.waitForTransactionReceipt({ hash });
       showSuccess(`Agent ${actionAddress.slice(0, 10)}... reactivated. Tx: ${hash.slice(0, 10)}...`);
@@ -362,7 +391,26 @@ export default function DelegationsPage() {
             {/* --- Subject & Timing --- */}
             <div style={{ gridColumn: "1 / -1" }}>
               <label style={fieldLabel}>Agent Safe Address * (the agent to configure)</label>
-              <input type="text" placeholder="0x..." value={delSubject} onChange={(e) => setDelSubject(e.target.value)} style={{ width: "100%" }} />
+              {localAgents.length > 0 && (
+                <select
+                  value={delSubject}
+                  onChange={(e) => setDelSubject(e.target.value)}
+                  style={{ width: "100%", marginBottom: 8 }}
+                >
+                  <option value="">Select a known agent...</option>
+                  {localAgents.map((a) => (
+                    <option key={a.address} value={a.safeAddress || a.address}>
+                      {a.label} ({(a.safeAddress || a.address).slice(0, 10)}...)
+                    </option>
+                  ))}
+                  {agents.filter((a) => !localAgents.some((l) => l.address.toLowerCase() === a.agentEOA.toLowerCase())).map((a) => (
+                    <option key={a.agentSafe} value={a.agentSafe}>
+                      On-chain: {a.agentSafe.slice(0, 10)}...
+                    </option>
+                  ))}
+                </select>
+              )}
+              <input type="text" placeholder="0x... (or select above)" value={delSubject} onChange={(e) => setDelSubject(e.target.value)} style={{ width: "100%" }} />
             </div>
             <div>
               <label style={fieldLabel}>Valid for (days)</label>
@@ -576,7 +624,7 @@ export default function DelegationsPage() {
       {filtered.length === 0 ? (
         <div className="empty-state">
           <h3>No Agent Scopes Found</h3>
-          <p>{agents.length === 0 ? "No agents registered yet. Register agent Safes first." : "No agents match your filters."}</p>
+          <p>{agents.length === 0 ? (<>No agents found. Configure your Safe address in <a href="/settings" style={{ color: "var(--accent)" }}>Settings</a> first.</>) : "No agents match your filters."}</p>
         </div>
       ) : (
         <div className="card">

@@ -1,43 +1,60 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { useWallet } from "@/lib/wallet";
 import {
   getRegistryAddress,
+  getNexoidModuleAddress,
   IDENTITY_REGISTRY_ABI,
-  ENTITY_TYPES,
-  ENTITY_STATUSES,
+  NEXOID_MODULE_ABI,
+  SAFE_PROXY_FACTORY_ABI,
+  SAFE_ABI,
+  SAFE_PROXY_FACTORY,
+  SAFE_SINGLETON,
+  SAFE_FALLBACK_HANDLER,
+  ALLOWANCE_MODULE_ADDRESS,
 } from "@/lib/contracts";
-import { keccak256, stringToHex } from "viem";
+import {
+  keccak256,
+  stringToHex,
+  encodeFunctionData,
+  pad,
+  concat,
+  decodeEventLog,
+  zeroAddress,
+  type Address,
+  type Hex,
+} from "viem";
+import {
+  getLinkedDids,
+  addLinkedDid,
+  removeLinkedDid,
+  getStoredAgents,
+  addStoredAgent,
+  getSafeAddress,
+  type LinkedDid,
+} from "@/lib/storage";
 
-interface Identity {
-  address: string;
-  entityType: string;
-  entityTypeId: number;
-  status: string;
-  statusId: number;
-  createdAt: number;
-  metadataHash: string;
-  owner: string;
-  did: string;
-  blockNumber?: number;
-}
+// --- Helpers ---
 
-type ModalType =
-  | "register"
-  | "createAgent"
-  | "updateStatus"
-  | "updateMetadata"
-  | null;
-
-// --- Canonical hash matching core-client/identity.ts ---
 function canonicalHash(obj: Record<string, unknown>): `0x${string}` {
   const sorted = Object.keys(obj).sort();
   const canonical = JSON.stringify(obj, sorted);
   return keccak256(stringToHex(canonical));
 }
 
-// --- Label style helper ---
+function buildPreApprovedSig(owner: Address): Hex {
+  const r = pad(owner, { size: 32 });
+  const s = pad("0x00" as Hex, { size: 32 });
+  const v = "0x01" as Hex;
+  return concat([r, s, v]);
+}
+
+const ZERO_BYTES32 = "0x0000000000000000000000000000000000000000000000000000000000000000" as Hex;
+
+const ENTITY_TYPES = ["Human", "VirtualAgent", "PhysicalAgent", "Organization"];
+const ENTITY_STATUSES = ["Active", "Suspended", "Revoked"];
+
 const fieldLabel: React.CSSProperties = {
   display: "block",
   fontSize: "13px",
@@ -45,408 +62,429 @@ const fieldLabel: React.CSSProperties = {
   marginBottom: "4px",
 };
 
+interface IdentityInfo {
+  address: string;
+  did: string;
+  entityType: string;
+  status: string;
+  owner: string;
+}
+
+interface OnChainAgent {
+  agentSafe: string;
+  agentEOA: string;
+  scopeHash: string;
+  credentialHash: string;
+  validUntil: number;
+  status: number;
+  statusName: string;
+}
+
+// --- Component ---
+
 export default function IdentitiesPage() {
   const { address: walletAddress, walletClient, publicClient, chain } = useWallet();
-  const [identities, setIdentities] = useState<Identity[]>([]);
-  const [loading, setLoading] = useState(true);
+  const registryAddress = getRegistryAddress();
+  const nexoidModuleAddress = getNexoidModuleAddress();
+
+  // My identities from on-chain
+  const [identities, setIdentities] = useState<IdentityInfo[]>([]);
+  const [identitiesLoading, setIdentitiesLoading] = useState(true);
+
+  // Linked DIDs
+  const [linkedDids, setLinkedDids] = useState<LinkedDid[]>([]);
+  const [showLinkDid, setShowLinkDid] = useState(false);
+  const [didInput, setDidInput] = useState("");
+  const [didVerifying, setDidVerifying] = useState(false);
+  const [didVerifyResult, setDidVerifyResult] = useState<{
+    valid: boolean;
+    address: string;
+    entityType: string;
+    status: string;
+  } | null>(null);
+  const [didError, setDidError] = useState("");
+
+  // Agent creation
+  const [showCreateAgent, setShowCreateAgent] = useState(false);
+  const [agentMode, setAgentMode] = useState<"existing" | "generate">("generate");
+  const [agentAddress, setAgentAddress] = useState("");
+  const [agentLabel, setAgentLabel] = useState("");
+
+  // Key generation
+  const [seedPhrase, setSeedPhrase] = useState("");
+  const [agentIndex, setAgentIndex] = useState("1");
+  const [derivedAgent, setDerivedAgent] = useState<{ address: string; privateKey: string } | null>(null);
+  const [generating, setGenerating] = useState(false);
+
+  // Safe deployment for agent
+  const [deployAgentSafe, setDeployAgentSafe] = useState(true);
+  const [agentSafeAddress, setAgentSafeAddress] = useState("");
+
+  // Transaction state
+  const [txPending, setTxPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
-  const [filterType, setFilterType] = useState("all");
-  const [filterStatus, setFilterStatus] = useState("all");
-  const [selected, setSelected] = useState<Identity | null>(null);
-  const [modal, setModal] = useState<ModalType>(null);
-  const [txPending, setTxPending] = useState(false);
-  const [showJson, setShowJson] = useState(false);
+  const [creationStep, setCreationStep] = useState<number | null>(null);
 
-  // --- Register Identity form ---
-  const [regEntityType, setRegEntityType] = useState(0); // Human=0, Organization=3
-  const [regName, setRegName] = useState("");
-  const [regEmail, setRegEmail] = useState("");
-  const [regRole, setRegRole] = useState("");
-  const [regDescription, setRegDescription] = useState("");
-  // Org-specific
-  const [regWebsite, setRegWebsite] = useState("");
-  const [regIndustry, setRegIndustry] = useState("");
-  // Custom fields
-  const [regCustomKey, setRegCustomKey] = useState("");
-  const [regCustomValue, setRegCustomValue] = useState("");
-  const [regCustomFields, setRegCustomFields] = useState<Record<string, string>>({});
+  // Agents: on-chain + local
+  const [onChainAgents, setOnChainAgents] = useState<OnChainAgent[]>([]);
+  const [agentsLoading, setAgentsLoading] = useState(true);
+  const [storedAgents, setStoredAgents] = useState(getStoredAgents());
 
-  // --- Create Agent form ---
-  const [agentAddress, setAgentAddress] = useState("");
-  const [agentType, setAgentType] = useState(1); // VirtualAgent=1, PhysicalAgent=2
-  const [agentLabel, setAgentLabel] = useState("");
-  const [agentModel, setAgentModel] = useState("");
-  const [agentDescription, setAgentDescription] = useState("");
-  const [agentCapabilities, setAgentCapabilities] = useState("");
-  const [agentEnvironment, setAgentEnvironment] = useState("");
-  const [agentCustomKey, setAgentCustomKey] = useState("");
-  const [agentCustomValue, setAgentCustomValue] = useState("");
-  const [agentCustomFields, setAgentCustomFields] = useState<Record<string, string>>({});
-
-  // --- Update Status form ---
-  const [statusTarget, setStatusTarget] = useState("");
-  const [statusValue, setStatusValue] = useState(1);
-
-  // --- Update Metadata form ---
-  const [metaTarget, setMetaTarget] = useState("");
-  const [metaName, setMetaName] = useState("");
-  const [metaEmail, setMetaEmail] = useState("");
-  const [metaRole, setMetaRole] = useState("");
-  const [metaDescription, setMetaDescription] = useState("");
-  const [metaWebsite, setMetaWebsite] = useState("");
-  const [metaCustomKey, setMetaCustomKey] = useState("");
-  const [metaCustomValue, setMetaCustomValue] = useState("");
-  const [metaCustomFields, setMetaCustomFields] = useState<Record<string, string>>({});
-
-  const registryAddress = getRegistryAddress();
-
-  const loadIdentities = () => {
-    setLoading(true);
-    fetch("/api/identities")
-      .then((r) => r.json())
-      .then((data) => setIdentities(data.identities ?? []))
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-  };
-
+  // Load data on mount and when wallet connects
   useEffect(() => {
+    setLinkedDids(getLinkedDids());
+    setStoredAgents(getStoredAgents());
     loadIdentities();
-  }, []);
+    loadOnChainAgents();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [walletAddress]);
 
-  const showSuccess = (msg: string) => {
-    setSuccess(msg);
-    setTimeout(() => setSuccess(null), 5000);
-  };
-  const showError = (msg: string) => {
-    setError(msg);
-    setTimeout(() => setError(null), 8000);
-  };
+  const showSuccess = useCallback((msg: string) => { setSuccess(msg); setTimeout(() => setSuccess(null), 5000); }, []);
+  const showError = useCallback((msg: string) => { setError(msg); setTimeout(() => setError(null), 8000); }, []);
 
-  const lookupAddress = async () => {
-    if (!search.startsWith("0x") || search.length !== 42) return;
-    setLoading(true);
+  // --- Load identities from on-chain ---
+  const loadIdentities = async () => {
+    setIdentitiesLoading(true);
     try {
-      const res = await fetch(`/api/identities?address=${search}`);
-      const data = await res.json();
-      if (data.registered) setSelected(data.identity);
-      else showError(`Address ${search} is not registered.`);
-    } catch (e) {
-      showError((e as Error).message);
+      // Get identities linked to this wallet via linked DIDs
+      const dids = getLinkedDids();
+      const results: IdentityInfo[] = [];
+
+      for (const d of dids) {
+        try {
+          const identity = await publicClient.readContract({
+            address: registryAddress,
+            abi: IDENTITY_REGISTRY_ABI,
+            functionName: "getIdentity",
+            args: [d.address as Address],
+          }) as { entityType: number; status: number; owner: Address };
+
+          results.push({
+            address: d.address,
+            did: d.did,
+            entityType: ENTITY_TYPES[identity.entityType] ?? "Unknown",
+            status: ENTITY_STATUSES[identity.status] ?? "Unknown",
+            owner: identity.owner,
+          });
+        } catch {
+          // Identity not found on-chain, still show from local
+          results.push({
+            address: d.address,
+            did: d.did,
+            entityType: d.entityType,
+            status: "Unknown",
+            owner: "",
+          });
+        }
+      }
+
+      setIdentities(results);
+    } catch {
+      // Silently fail - identities will just be empty
     } finally {
-      setLoading(false);
+      setIdentitiesLoading(false);
     }
   };
 
-  // --- Build metadata objects ---
+  // --- Load on-chain agents ---
+  // The NexoidModule keys agents by msg.sender. When registerAgentSafe is called
+  // directly from the EOA (not via Safe transaction), msg.sender is the EOA.
+  // So we query both the operator Safe AND the connected wallet EOA.
+  const loadOnChainAgents = async () => {
+    setAgentsLoading(true);
+    try {
+      const all: OnChainAgent[] = [];
+      const queried = new Set<string>();
 
-  const regMetadataObj = useMemo(() => {
-    const obj: Record<string, unknown> = {};
-    if (regName) obj.name = regName;
-    if (regEmail) obj.email = regEmail;
-    if (regEntityType === 0 && regRole) obj.role = regRole;
-    if (regEntityType === 3 && regWebsite) obj.website = regWebsite;
-    if (regEntityType === 3 && regIndustry) obj.industry = regIndustry;
-    if (regDescription) obj.description = regDescription;
-    for (const [k, v] of Object.entries(regCustomFields)) {
-      obj[k] = v;
+      const safeAddr = getSafeAddress();
+      if (safeAddr) {
+        queried.add(safeAddr.toLowerCase());
+        const res = await fetch(`/api/delegations?operator=${safeAddr}`);
+        const data = await res.json();
+        if (data.agents) all.push(...data.agents);
+      }
+
+      // Also query with the connected wallet EOA (msg.sender for direct calls)
+      if (walletAddress && !queried.has(walletAddress.toLowerCase())) {
+        const res = await fetch(`/api/delegations?operator=${walletAddress}`);
+        const data = await res.json();
+        if (data.agents) all.push(...data.agents);
+      }
+
+      setOnChainAgents(all);
+    } catch {
+      // Silently fail
+    } finally {
+      setAgentsLoading(false);
     }
-    return obj;
-  }, [regName, regEmail, regRole, regDescription, regWebsite, regIndustry, regEntityType, regCustomFields]);
+  };
+
+  // Merge on-chain agents with local metadata
+  const mergedAgents = useMemo(() => {
+    return onChainAgents.map((agent) => {
+      const local = storedAgents.find(
+        (s) =>
+          s.address.toLowerCase() === agent.agentEOA.toLowerCase() ||
+          (s.safeAddress && s.safeAddress.toLowerCase() === agent.agentSafe.toLowerCase())
+      );
+      return { ...agent, local };
+    });
+  }, [onChainAgents, storedAgents]);
+
+  // Local-only agents (not yet on-chain)
+  const localOnlyAgents = useMemo(() => {
+    return storedAgents.filter(
+      (s) =>
+        !onChainAgents.some(
+          (a) =>
+            a.agentEOA.toLowerCase() === s.address.toLowerCase() ||
+            (s.safeAddress && a.agentSafe.toLowerCase() === s.safeAddress.toLowerCase())
+        )
+    );
+  }, [onChainAgents, storedAgents]);
+
+  // --- Link DID ---
+
+  const parseDid = (did: string): string | null => {
+    const match = did.match(/^did:nexoid:eth:(0x[a-fA-F0-9]{40})$/);
+    return match ? match[1] : null;
+  };
+
+  const verifyDid = async () => {
+    const address = parseDid(didInput);
+    if (!address) {
+      setDidError("Invalid DID format. Expected: did:nexoid:eth:0x...");
+      setDidVerifyResult(null);
+      return;
+    }
+    setDidVerifying(true);
+    setDidError("");
+    setDidVerifyResult(null);
+    try {
+      const registered = await publicClient.readContract({
+        address: registryAddress, abi: IDENTITY_REGISTRY_ABI,
+        functionName: "isRegistered", args: [address as Address],
+      });
+      if (!registered) {
+        setDidError("This DID is not registered on the IdentityRegistry.");
+        return;
+      }
+      const identity = await publicClient.readContract({
+        address: registryAddress, abi: IDENTITY_REGISTRY_ABI,
+        functionName: "getIdentity", args: [address as Address],
+      }) as { entityType: number; status: number };
+
+      setDidVerifyResult({
+        valid: true,
+        address,
+        entityType: ENTITY_TYPES[identity.entityType] ?? "Unknown",
+        status: ENTITY_STATUSES[identity.status] ?? "Unknown",
+      });
+    } catch (e) {
+      setDidError(e instanceof Error ? e.message : "Failed to verify");
+    } finally {
+      setDidVerifying(false);
+    }
+  };
+
+  const linkDid = () => {
+    if (!didVerifyResult) return;
+    addLinkedDid({
+      did: didInput,
+      address: didVerifyResult.address,
+      entityType: didVerifyResult.entityType,
+      linkedAt: Date.now(),
+    });
+    setLinkedDids(getLinkedDids());
+    setDidInput("");
+    setDidVerifyResult(null);
+    setShowLinkDid(false);
+    showSuccess("DID linked successfully.");
+    loadIdentities();
+  };
+
+  const unlinkDid = (did: string) => {
+    removeLinkedDid(did);
+    setLinkedDids(getLinkedDids());
+    loadIdentities();
+  };
+
+  // --- Agent Key Generation ---
+
+  const generateMnemonic = async () => {
+    setGenerating(true);
+    try {
+      const res = await fetch("/api/wdk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "generate" }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setSeedPhrase(data.seedPhrase);
+      setDerivedAgent(null);
+    } catch (e) {
+      showError(e instanceof Error ? e.message : "Failed to generate");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const deriveAgentKey = async () => {
+    if (!seedPhrase) return;
+    setGenerating(true);
+    try {
+      const res = await fetch("/api/wdk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "derive-agent", seedPhrase, index: parseInt(agentIndex) }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setDerivedAgent(data.agent);
+      setAgentAddress(data.agent.address);
+    } catch (e) {
+      showError(e instanceof Error ? e.message : "Failed to derive");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  // --- Agent metadata ---
 
   const agentMetadataObj = useMemo(() => {
     const obj: Record<string, unknown> = {};
     if (agentLabel) obj.label = agentLabel;
-    if (agentModel) obj.model = agentModel;
-    if (agentDescription) obj.description = agentDescription;
-    if (agentCapabilities) obj.capabilities = agentCapabilities.split(",").map((s) => s.trim()).filter(Boolean);
-    if (agentEnvironment) obj.environment = agentEnvironment;
     if (walletAddress) obj.operator = `did:nexoid:eth:${walletAddress.toLowerCase()}`;
-    if (agentType === 2) obj.agentType = "physical";
-    for (const [k, v] of Object.entries(agentCustomFields)) {
-      obj[k] = v;
-    }
     return obj;
-  }, [agentLabel, agentModel, agentDescription, agentCapabilities, agentEnvironment, agentCustomFields, walletAddress, agentType]);
+  }, [agentLabel, walletAddress]);
 
-  const metaObj = useMemo(() => {
-    const obj: Record<string, unknown> = {};
-    if (metaName) obj.name = metaName;
-    if (metaEmail) obj.email = metaEmail;
-    if (metaRole) obj.role = metaRole;
-    if (metaDescription) obj.description = metaDescription;
-    if (metaWebsite) obj.website = metaWebsite;
-    for (const [k, v] of Object.entries(metaCustomFields)) {
-      obj[k] = v;
-    }
-    return obj;
-  }, [metaName, metaEmail, metaRole, metaDescription, metaWebsite, metaCustomFields]);
+  // --- Create Agent ---
 
-  // --- Write operations ---
-
-  const registerIdentity = async () => {
-    if (!walletClient) return showError("Connect wallet first.");
-    setTxPending(true);
-    try {
-      const hasFields = Object.keys(regMetadataObj).length > 0;
-      const metadataHash = hasFields
-        ? canonicalHash(regMetadataObj)
-        : ("0x" + "0".repeat(64)) as `0x${string}`;
-      const hash = await walletClient.writeContract({
-        address: registryAddress,
-        abi: IDENTITY_REGISTRY_ABI,
-        functionName: "registerIdentity",
-        args: [regEntityType, metadataHash],
-        chain,
-        account: walletAddress!,
-      });
-      await publicClient.waitForTransactionReceipt({ hash });
-      showSuccess(`Identity registered. Tx: ${hash.slice(0, 10)}...`);
-      setModal(null);
-      resetRegForm();
-      loadIdentities();
-    } catch (e: any) {
-      showError(e.shortMessage ?? e.message);
-    } finally {
-      setTxPending(false);
-    }
-  };
-
-  const createAgent = async () => {
-    if (!walletClient) return showError("Connect wallet first.");
-    if (!agentAddress.startsWith("0x") || agentAddress.length !== 42)
+  const handleCreateAgent = async () => {
+    if (!walletClient || !walletAddress) return showError("Connect wallet first.");
+    if (!agentAddress || !agentAddress.startsWith("0x") || agentAddress.length !== 42)
       return showError("Invalid agent address.");
+
     setTxPending(true);
+    setCreationStep(0);
+    setError(null);
     try {
-      const hasFields = Object.keys(agentMetadataObj).length > 0;
-      const metadataHash = hasFields
-        ? canonicalHash(agentMetadataObj)
-        : ("0x" + "0".repeat(64)) as `0x${string}`;
-      const hash = await walletClient.writeContract({
-        address: registryAddress,
-        abi: IDENTITY_REGISTRY_ABI,
-        functionName: "createAgentIdentity",
-        args: [agentAddress as `0x${string}`, agentType, metadataHash],
-        chain,
-        account: walletAddress!,
-      });
-      await publicClient.waitForTransactionReceipt({ hash });
-      showSuccess(`Agent created at ${agentAddress.slice(0, 10)}... Tx: ${hash.slice(0, 10)}...`);
-      setModal(null);
-      resetAgentForm();
-      loadIdentities();
-    } catch (e: any) {
-      showError(e.shortMessage ?? e.message);
-    } finally {
-      setTxPending(false);
-    }
-  };
+      const agentAddr = agentAddress as Address;
+      let finalSafeAddress = "";
 
-  const updateStatus = async () => {
-    if (!walletClient) return showError("Connect wallet first.");
-    if (!statusTarget.startsWith("0x") || statusTarget.length !== 42)
-      return showError("Invalid target address.");
-    setTxPending(true);
-    try {
-      const hash = await walletClient.writeContract({
-        address: registryAddress,
-        abi: IDENTITY_REGISTRY_ABI,
-        functionName: "updateStatus",
-        args: [statusTarget as `0x${string}`, statusValue],
-        chain,
-        account: walletAddress!,
-      });
-      await publicClient.waitForTransactionReceipt({ hash });
-      showSuccess(`Status updated to ${ENTITY_STATUSES[statusValue]}. Tx: ${hash.slice(0, 10)}...`);
-      setModal(null);
-      setStatusTarget("");
-      loadIdentities();
-    } catch (e: any) {
-      showError(e.shortMessage ?? e.message);
-    } finally {
-      setTxPending(false);
-    }
-  };
+      if (deployAgentSafe) {
+        // Step 0: Deploy Agent Safe
+        setCreationStep(0);
+        const initializer = encodeFunctionData({
+          abi: SAFE_ABI,
+          functionName: "setup",
+          args: [
+            [walletAddress],
+            1n,
+            zeroAddress, "0x",
+            SAFE_FALLBACK_HANDLER,
+            zeroAddress, 0n, zeroAddress,
+          ],
+        });
+        const saltNonce = BigInt(Date.now());
+        const deployTx = await walletClient.writeContract({
+          chain, account: walletAddress, gas: 1_000_000n,
+          address: SAFE_PROXY_FACTORY,
+          abi: SAFE_PROXY_FACTORY_ABI,
+          functionName: "createProxyWithNonce",
+          args: [SAFE_SINGLETON, initializer, saltNonce],
+        });
+        const receipt = await publicClient.waitForTransactionReceipt({ hash: deployTx });
 
-  const updateMetadata = async () => {
-    if (!walletClient) return showError("Connect wallet first.");
-    if (!metaTarget.startsWith("0x") || metaTarget.length !== 42)
-      return showError("Invalid target address.");
-    setTxPending(true);
-    try {
-      const hasFields = Object.keys(metaObj).length > 0;
-      const newHash = hasFields
-        ? canonicalHash(metaObj)
-        : ("0x" + "0".repeat(64)) as `0x${string}`;
-      const hash = await walletClient.writeContract({
-        address: registryAddress,
-        abi: IDENTITY_REGISTRY_ABI,
-        functionName: "updateMetadata",
-        args: [metaTarget as `0x${string}`, newHash],
-        chain,
-        account: walletAddress!,
-      });
-      await publicClient.waitForTransactionReceipt({ hash });
-      showSuccess(`Metadata updated. Tx: ${hash.slice(0, 10)}...`);
-      setModal(null);
-      resetMetaForm();
-      loadIdentities();
-    } catch (e: any) {
-      showError(e.shortMessage ?? e.message);
-    } finally {
-      setTxPending(false);
-    }
-  };
-
-  // --- Reset helpers ---
-  const resetRegForm = () => {
-    setRegName(""); setRegEmail(""); setRegRole("");
-    setRegDescription(""); setRegWebsite(""); setRegIndustry("");
-    setRegCustomFields({}); setRegCustomKey(""); setRegCustomValue("");
-  };
-  const resetAgentForm = () => {
-    setAgentAddress(""); setAgentLabel(""); setAgentModel("");
-    setAgentDescription(""); setAgentCapabilities(""); setAgentEnvironment("");
-    setAgentCustomFields({}); setAgentCustomKey(""); setAgentCustomValue("");
-  };
-  const resetMetaForm = () => {
-    setMetaTarget(""); setMetaName(""); setMetaEmail("");
-    setMetaRole(""); setMetaDescription(""); setMetaWebsite("");
-    setMetaCustomFields({}); setMetaCustomKey(""); setMetaCustomValue("");
-  };
-
-  // --- Prefill helpers ---
-  const openStatusModal = (id: Identity) => {
-    setStatusTarget(id.address);
-    setStatusValue(id.statusId === 0 ? 1 : id.statusId === 1 ? 0 : 1);
-    setModal("updateStatus");
-  };
-  const openMetaModal = (id: Identity) => {
-    setMetaTarget(id.address);
-    resetMetaForm();
-    setMetaTarget(id.address);
-    setModal("updateMetadata");
-  };
-
-  const filtered = identities.filter((id) => {
-    if (filterType !== "all" && id.entityType !== filterType) return false;
-    if (filterStatus !== "all" && id.status !== filterStatus) return false;
-    if (search && !id.address.toLowerCase().includes(search.toLowerCase()) && !id.did.toLowerCase().includes(search.toLowerCase())) return false;
-    return true;
-  });
-
-  // --- JSON preview component ---
-  const JsonPreview = ({ obj, label }: { obj: Record<string, unknown>; label: string }) => {
-    const keys = Object.keys(obj);
-    if (keys.length === 0) return null;
-    const hash = canonicalHash(obj);
-    return (
-      <div style={{ marginTop: "12px", borderTop: "1px solid var(--border)", paddingTop: "12px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-          <span style={{ fontSize: "12px", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-            {label}
-          </span>
-          <button
-            className="btn"
-            style={{ padding: "2px 8px", fontSize: "11px" }}
-            onClick={() => setShowJson(!showJson)}
-          >
-            {showJson ? "Hide JSON" : "Show JSON"}
-          </button>
-        </div>
-        {showJson && (
-          <pre style={{
-            background: "var(--bg)",
-            border: "1px solid var(--border)",
-            borderRadius: "var(--radius)",
-            padding: "12px",
-            fontSize: "12px",
-            fontFamily: "'SF Mono', 'Fira Code', monospace",
-            overflowX: "auto",
-            marginBottom: "8px",
-          }}>
-            {JSON.stringify(obj, Object.keys(obj).sort(), 2)}
-          </pre>
-        )}
-        <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>
-          <span style={{ fontWeight: 600 }}>Hash:</span>{" "}
-          <span className="mono" style={{ wordBreak: "break-all" }}>{hash}</span>
-        </div>
-      </div>
-    );
-  };
-
-  // --- Custom field adder component ---
-  const CustomFieldAdder = ({
-    customKey, setCustomKey, customValue, setCustomValue, customFields, setCustomFields,
-  }: {
-    customKey: string; setCustomKey: (v: string) => void;
-    customValue: string; setCustomValue: (v: string) => void;
-    customFields: Record<string, string>; setCustomFields: (v: Record<string, string>) => void;
-  }) => (
-    <div>
-      <label style={fieldLabel}>Custom Fields</label>
-      {Object.entries(customFields).length > 0 && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "8px" }}>
-          {Object.entries(customFields).map(([k, v]) => (
-            <span
-              key={k}
-              style={{
-                display: "inline-flex", alignItems: "center", gap: "4px",
-                background: "var(--bg)", border: "1px solid var(--border)",
-                borderRadius: "4px", padding: "2px 8px", fontSize: "12px",
-              }}
-            >
-              <span className="mono">{k}:</span> {v}
-              <button
-                style={{ background: "none", border: "none", color: "var(--danger)", cursor: "pointer", padding: "0 2px", fontSize: "14px" }}
-                onClick={() => {
-                  const next = { ...customFields };
-                  delete next[k];
-                  setCustomFields(next);
-                }}
-              >
-                x
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
-      <div style={{ display: "flex", gap: "8px" }}>
-        <input
-          type="text"
-          placeholder="key"
-          value={customKey}
-          onChange={(e) => setCustomKey(e.target.value)}
-          style={{ width: "120px" }}
-        />
-        <input
-          type="text"
-          placeholder="value"
-          value={customValue}
-          onChange={(e) => setCustomValue(e.target.value)}
-          style={{ flex: 1 }}
-        />
-        <button
-          className="btn"
-          style={{ padding: "4px 10px", fontSize: "12px" }}
-          onClick={() => {
-            if (customKey.trim()) {
-              setCustomFields({ ...customFields, [customKey.trim()]: customValue });
-              setCustomKey("");
-              setCustomValue("");
+        let newSafeAddr: Address | null = null;
+        for (const log of receipt.logs) {
+          try {
+            const decoded = decodeEventLog({ abi: SAFE_PROXY_FACTORY_ABI, data: log.data, topics: log.topics });
+            if (decoded.eventName === "ProxyCreation") {
+              newSafeAddr = (decoded.args as { proxy: Address }).proxy;
+              break;
             }
-          }}
-        >
-          Add
-        </button>
-      </div>
-    </div>
-  );
+          } catch { /* not our event */ }
+        }
+        if (!newSafeAddr) throw new Error("Safe address not found in receipt");
 
-  if (loading && identities.length === 0)
-    return <div className="loading">Loading identities...</div>;
+        // Step 1: Enable AllowanceModule
+        setCreationStep(1);
+        const enableData = encodeFunctionData({ abi: SAFE_ABI, functionName: "enableModule", args: [ALLOWANCE_MODULE_ADDRESS] });
+        const sig = buildPreApprovedSig(walletAddress);
+        const enableTx = await walletClient.writeContract({
+          chain, account: walletAddress, gas: 500_000n,
+          address: newSafeAddr, abi: SAFE_ABI, functionName: "execTransaction",
+          args: [newSafeAddr, 0n, enableData, 0, 0n, 0n, 0n, zeroAddress, zeroAddress, sig],
+        });
+        await publicClient.waitForTransactionReceipt({ hash: enableTx });
+
+        finalSafeAddress = newSafeAddr;
+        setAgentSafeAddress(newSafeAddr);
+      }
+
+      // Step 2: Register Agent Identity
+      setCreationStep(2);
+      const hasFields = Object.keys(agentMetadataObj).length > 0;
+      const metadataHash = hasFields ? canonicalHash(agentMetadataObj) : ZERO_BYTES32 as `0x${string}`;
+
+      const tx1 = await walletClient.writeContract({
+        chain, account: walletAddress, gas: 500_000n,
+        address: registryAddress, abi: IDENTITY_REGISTRY_ABI,
+        functionName: "createAgentIdentity",
+        args: [agentAddr, 1, metadataHash],
+      });
+      await publicClient.waitForTransactionReceipt({ hash: tx1 });
+
+      if (nexoidModuleAddress) {
+        // Step 3: Register on NexoidModule
+        setCreationStep(3);
+        const agentSafe = (finalSafeAddress || agentAddress) as Address;
+        const tx2 = await walletClient.writeContract({
+          chain, account: walletAddress, gas: 500_000n,
+          address: nexoidModuleAddress, abi: NEXOID_MODULE_ABI,
+          functionName: "registerAgentSafe",
+          args: [agentSafe, agentAddr, ZERO_BYTES32, ZERO_BYTES32, 0n],
+        });
+        await publicClient.waitForTransactionReceipt({ hash: tx2 });
+      }
+
+      // Step 4: Complete
+      setCreationStep(4);
+
+      addStoredAgent({
+        address: agentAddress,
+        safeAddress: finalSafeAddress || undefined,
+        label: agentLabel || "Agent",
+        mnemonic: seedPhrase || undefined,
+        mnemonicIndex: seedPhrase ? parseInt(agentIndex) : undefined,
+        createdAt: Date.now(),
+      });
+      setStoredAgents(getStoredAgents());
+      setShowCreateAgent(false);
+      loadOnChainAgents();
+
+      showSuccess(`Agent created: ${agentAddress.slice(0, 10)}...${finalSafeAddress ? ` Safe: ${finalSafeAddress.slice(0, 10)}...` : ""}`);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      showError(msg.slice(0, 300));
+    } finally {
+      setTxPending(false);
+      setCreationStep(null);
+    }
+  };
+
+
+  const statusColor = (status: string) => {
+    switch (status.toLowerCase()) {
+      case "active": return "var(--success)";
+      case "suspended": return "var(--warning)";
+      case "revoked": return "var(--danger)";
+      default: return "var(--text-muted)";
+    }
+  };
 
   return (
     <div>
@@ -457,347 +495,444 @@ export default function IdentitiesPage() {
         </div>
       )}
 
-      {/* Action buttons */}
-      <div style={{ display: "flex", gap: "8px", marginBottom: "20px" }}>
-        <button className="btn btn-primary" onClick={() => { resetRegForm(); setModal("register"); }}>
-          Register Identity
-        </button>
-        <button className="btn btn-primary" onClick={() => { resetAgentForm(); setModal("createAgent"); }}>
-          Create Agent
-        </button>
-        <button className="btn" onClick={() => setModal("updateStatus")}>
-          Update Status
-        </button>
-        <button className="btn" onClick={() => { resetMetaForm(); setModal("updateMetadata"); }}>
-          Update Metadata
-        </button>
-      </div>
+      {/* ===== MY IDENTITIES ===== */}
+      <div style={{ marginBottom: 32 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <h2 style={{ fontSize: 18, fontWeight: 700 }}>My Identities</h2>
+          <button
+            className="btn"
+            onClick={() => setShowLinkDid(!showLinkDid)}
+            style={{ display: "flex", alignItems: "center", gap: 6 }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            Link DID
+          </button>
+        </div>
 
-      {/* ===== REGISTER IDENTITY MODAL ===== */}
-      {modal === "register" && (
-        <div className="card" style={{ marginBottom: "20px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "16px" }}>
-            <h3>Register Your Identity</h3>
-            <button className="btn" onClick={() => setModal(null)}>Cancel</button>
-          </div>
-          <p style={{ color: "var(--text-muted)", fontSize: "13px", marginBottom: "16px" }}>
-            Self-registration for your connected wallet ({walletAddress?.slice(0, 6)}...{walletAddress?.slice(-4) ?? "not connected"}).
-            Only the hash of your metadata is stored on-chain.
-          </p>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-            <div>
-              <label style={fieldLabel}>Entity Type *</label>
-              <select value={regEntityType} onChange={(e) => setRegEntityType(Number(e.target.value))} style={{ width: "100%" }}>
-                <option value={0}>Human</option>
-                <option value={3}>Organization</option>
-              </select>
+        {/* Link DID expandable */}
+        {showLinkDid && (
+          <div className="card" style={{ marginBottom: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h3 style={{ fontSize: 15, fontWeight: 600 }}>Link DID</h3>
+              <button className="btn" style={{ padding: "4px 10px", fontSize: 12 }} onClick={() => setShowLinkDid(false)}>Cancel</button>
             </div>
-            <div>
-              <label style={fieldLabel}>Name</label>
-              <input type="text" placeholder={regEntityType === 0 ? "Alice Johnson" : "Nexoid Inc."} value={regName} onChange={(e) => setRegName(e.target.value)} style={{ width: "100%" }} />
+            <p style={{ color: "var(--text-muted)", fontSize: "13px", marginBottom: "12px" }}>
+              Link your registered DID to this wallet. The DID must already be registered on the IdentityRegistry.
+            </p>
+            <div style={{ display: "flex", gap: 12 }}>
+              <input
+                type="text"
+                placeholder="did:nexoid:eth:0x..."
+                value={didInput}
+                onChange={(e) => { setDidInput(e.target.value); setDidVerifyResult(null); setDidError(""); }}
+                style={{ flex: 1 }}
+                className="mono"
+              />
+              <button className="btn btn-primary" onClick={verifyDid} disabled={didVerifying || !didInput}>
+                {didVerifying ? "Verifying..." : "Verify"}
+              </button>
             </div>
-            <div>
-              <label style={fieldLabel}>Email</label>
-              <input type="email" placeholder="alice@example.com" value={regEmail} onChange={(e) => setRegEmail(e.target.value)} style={{ width: "100%" }} />
-            </div>
-            {regEntityType === 0 ? (
-              <div>
-                <label style={fieldLabel}>Role</label>
-                <input type="text" placeholder="operator, admin, developer..." value={regRole} onChange={(e) => setRegRole(e.target.value)} style={{ width: "100%" }} />
+            {didError && <div className="error-msg" style={{ marginTop: 8 }}>{didError}</div>}
+
+            {didVerifyResult && (
+              <div style={{ marginTop: 12, padding: 12, background: "var(--bg-input)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>
+                      {didVerifyResult.entityType} — <span className={`badge badge-${didVerifyResult.status.toLowerCase()}`}>{didVerifyResult.status}</span>
+                    </div>
+                    <div className="mono" style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
+                      {didVerifyResult.address}
+                    </div>
+                  </div>
+                  <button className="btn btn-primary" onClick={linkDid}>Link to Wallet</button>
+                </div>
               </div>
-            ) : (
-              <>
-                <div>
-                  <label style={fieldLabel}>Website</label>
-                  <input type="url" placeholder="https://nexoid.io" value={regWebsite} onChange={(e) => setRegWebsite(e.target.value)} style={{ width: "100%" }} />
-                </div>
-                <div>
-                  <label style={fieldLabel}>Industry</label>
-                  <input type="text" placeholder="AI Infrastructure, DeFi..." value={regIndustry} onChange={(e) => setRegIndustry(e.target.value)} style={{ width: "100%" }} />
-                </div>
-              </>
             )}
-            <div style={{ gridColumn: "1 / -1" }}>
-              <label style={fieldLabel}>Description</label>
-              <input type="text" placeholder="Short description..." value={regDescription} onChange={(e) => setRegDescription(e.target.value)} style={{ width: "100%" }} />
-            </div>
-            <div style={{ gridColumn: "1 / -1" }}>
-              <CustomFieldAdder
-                customKey={regCustomKey} setCustomKey={setRegCustomKey}
-                customValue={regCustomValue} setCustomValue={setRegCustomValue}
-                customFields={regCustomFields} setCustomFields={setRegCustomFields}
-              />
-            </div>
-            <div style={{ gridColumn: "1 / -1" }}>
-              <JsonPreview obj={regMetadataObj} label="Metadata Preview (canonical JSON)" />
-            </div>
-            <div style={{ gridColumn: "1 / -1" }}>
-              <button className="btn btn-primary" onClick={registerIdentity} disabled={txPending || !walletAddress} style={{ width: "100%" }}>
-                {txPending ? "Sending Transaction..." : "Register Identity"}
-              </button>
-            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* ===== CREATE AGENT MODAL ===== */}
-      {modal === "createAgent" && (
-        <div className="card" style={{ marginBottom: "20px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "16px" }}>
-            <h3>Create Agent Identity</h3>
-            <button className="btn" onClick={() => setModal(null)}>Cancel</button>
+        {/* Identity cards */}
+        {identitiesLoading ? (
+          <div className="loading">Loading identities...</div>
+        ) : identities.length > 0 ? (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 16 }}>
+            {identities.map((id) => (
+              <div key={id.did} className="card" style={{ padding: 20 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+                  <div style={{
+                    width: 40, height: 40, borderRadius: "var(--radius-sm)",
+                    background: id.entityType === "Human" ? "var(--accent-soft)" : id.entityType === "Organization" ? "var(--purple-soft)" : "var(--cyan-soft)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 18, color: id.entityType === "Human" ? "var(--accent)" : "var(--text-secondary)",
+                  }}>
+                    {id.entityType === "Human" ? (
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                    ) : id.entityType === "Organization" ? (
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>
+                    ) : (
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="3"/></svg>
+                    )}
+                  </div>
+                  <span className={`badge badge-${id.status.toLowerCase()}`}>{id.status}</span>
+                </div>
+                <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>{id.entityType}</div>
+                <div className="mono" style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8, wordBreak: "break-all" }}>
+                  {id.did}
+                </div>
+                {id.owner && (
+                  <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                    Owner: <span className="mono">{id.owner.slice(0, 6)}...{id.owner.slice(-4)}</span>
+                  </div>
+                )}
+                <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
+                  <button className="btn btn-danger" style={{ fontSize: 11, padding: "2px 8px" }} onClick={() => unlinkDid(id.did)}>
+                    Unlink
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
-          <p style={{ color: "var(--text-muted)", fontSize: "13px", marginBottom: "16px" }}>
-            You must be a registered Human or Organization. Your wallet becomes the agent&apos;s owner (operator).
-          </p>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-            <div style={{ gridColumn: "1 / -1" }}>
-              <label style={fieldLabel}>Agent Address *</label>
-              <input type="text" placeholder="0x... (the address that will represent this agent)" value={agentAddress} onChange={(e) => setAgentAddress(e.target.value)} style={{ width: "100%" }} />
-            </div>
-            <div>
-              <label style={fieldLabel}>Agent Type *</label>
-              <select value={agentType} onChange={(e) => setAgentType(Number(e.target.value))} style={{ width: "100%" }}>
-                <option value={1}>Virtual Agent (software)</option>
-                <option value={2}>Physical Agent (robot/device)</option>
-              </select>
-            </div>
-            <div>
-              <label style={fieldLabel}>Label</label>
-              <input type="text" placeholder="trading-bot-1, data-crawler..." value={agentLabel} onChange={(e) => setAgentLabel(e.target.value)} style={{ width: "100%" }} />
-            </div>
-            <div>
-              <label style={fieldLabel}>Model</label>
-              <input type="text" placeholder="claude-opus-4-6, gpt-4o, custom..." value={agentModel} onChange={(e) => setAgentModel(e.target.value)} style={{ width: "100%" }} />
-            </div>
-            <div>
-              <label style={fieldLabel}>Environment</label>
-              <input type="text" placeholder="production, staging, dev..." value={agentEnvironment} onChange={(e) => setAgentEnvironment(e.target.value)} style={{ width: "100%" }} />
-            </div>
-            <div style={{ gridColumn: "1 / -1" }}>
-              <label style={fieldLabel}>Description</label>
-              <input type="text" placeholder="What does this agent do?" value={agentDescription} onChange={(e) => setAgentDescription(e.target.value)} style={{ width: "100%" }} />
-            </div>
-            <div style={{ gridColumn: "1 / -1" }}>
-              <label style={fieldLabel}>Capabilities (comma-separated)</label>
-              <input type="text" placeholder="send_usdt, get_balance, request_funds..." value={agentCapabilities} onChange={(e) => setAgentCapabilities(e.target.value)} style={{ width: "100%" }} />
-            </div>
-            <div style={{ gridColumn: "1 / -1" }}>
-              <CustomFieldAdder
-                customKey={agentCustomKey} setCustomKey={setAgentCustomKey}
-                customValue={agentCustomValue} setCustomValue={setAgentCustomValue}
-                customFields={agentCustomFields} setCustomFields={setAgentCustomFields}
-              />
-            </div>
-            <div style={{ gridColumn: "1 / -1" }}>
-              <JsonPreview obj={agentMetadataObj} label="Agent Metadata Preview" />
-            </div>
-            <div style={{ gridColumn: "1 / -1" }}>
-              <button className="btn btn-primary" onClick={createAgent} disabled={txPending || !walletAddress} style={{ width: "100%" }}>
-                {txPending ? "Sending Transaction..." : "Create Agent"}
-              </button>
-            </div>
+        ) : (
+          <div className="card" style={{ padding: 32, textAlign: "center" }}>
+            <div style={{ color: "var(--text-muted)", marginBottom: 8 }}>No identities linked yet.</div>
+            <button className="btn btn-primary" onClick={() => setShowLinkDid(true)}>Link your first DID</button>
           </div>
-        </div>
-      )}
-
-      {/* ===== UPDATE STATUS MODAL ===== */}
-      {modal === "updateStatus" && (
-        <div className="card" style={{ marginBottom: "20px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "16px" }}>
-            <h3>Update Identity Status</h3>
-            <button className="btn" onClick={() => setModal(null)}>Cancel</button>
-          </div>
-          <p style={{ color: "var(--text-muted)", fontSize: "13px", marginBottom: "16px" }}>
-            Only the identity owner or the identity itself can update status.
-            Active &rarr; Suspended, Suspended &rarr; Active, Any &rarr; Revoked (terminal).
-          </p>
-          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-            <div>
-              <label style={fieldLabel}>Target Address</label>
-              <input type="text" placeholder="0x..." value={statusTarget} onChange={(e) => setStatusTarget(e.target.value)} style={{ width: "100%" }} />
-            </div>
-            <div>
-              <label style={fieldLabel}>New Status</label>
-              <select value={statusValue} onChange={(e) => setStatusValue(Number(e.target.value))}>
-                <option value={0}>Active</option>
-                <option value={1}>Suspended</option>
-                <option value={2}>Revoked (irreversible)</option>
-              </select>
-            </div>
-            <button
-              className={`btn ${statusValue === 2 ? "btn-danger" : "btn-primary"}`}
-              onClick={updateStatus}
-              disabled={txPending || !walletAddress}
-            >
-              {txPending ? "Sending..." : statusValue === 2 ? "Revoke Identity" : "Update Status"}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ===== UPDATE METADATA MODAL ===== */}
-      {modal === "updateMetadata" && (
-        <div className="card" style={{ marginBottom: "20px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "16px" }}>
-            <h3>Update Metadata</h3>
-            <button className="btn" onClick={() => setModal(null)}>Cancel</button>
-          </div>
-          <p style={{ color: "var(--text-muted)", fontSize: "13px", marginBottom: "16px" }}>
-            Replaces the metadata hash for an identity. Only the owner or the identity itself can do this.
-          </p>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-            <div style={{ gridColumn: "1 / -1" }}>
-              <label style={fieldLabel}>Target Address</label>
-              <input type="text" placeholder="0x..." value={metaTarget} onChange={(e) => setMetaTarget(e.target.value)} style={{ width: "100%" }} />
-            </div>
-            <div>
-              <label style={fieldLabel}>Name</label>
-              <input type="text" placeholder="Updated name" value={metaName} onChange={(e) => setMetaName(e.target.value)} style={{ width: "100%" }} />
-            </div>
-            <div>
-              <label style={fieldLabel}>Email</label>
-              <input type="email" placeholder="updated@example.com" value={metaEmail} onChange={(e) => setMetaEmail(e.target.value)} style={{ width: "100%" }} />
-            </div>
-            <div>
-              <label style={fieldLabel}>Role</label>
-              <input type="text" placeholder="operator, admin..." value={metaRole} onChange={(e) => setMetaRole(e.target.value)} style={{ width: "100%" }} />
-            </div>
-            <div>
-              <label style={fieldLabel}>Website</label>
-              <input type="url" placeholder="https://..." value={metaWebsite} onChange={(e) => setMetaWebsite(e.target.value)} style={{ width: "100%" }} />
-            </div>
-            <div style={{ gridColumn: "1 / -1" }}>
-              <label style={fieldLabel}>Description</label>
-              <input type="text" placeholder="Updated description..." value={metaDescription} onChange={(e) => setMetaDescription(e.target.value)} style={{ width: "100%" }} />
-            </div>
-            <div style={{ gridColumn: "1 / -1" }}>
-              <CustomFieldAdder
-                customKey={metaCustomKey} setCustomKey={setMetaCustomKey}
-                customValue={metaCustomValue} setCustomValue={setMetaCustomValue}
-                customFields={metaCustomFields} setCustomFields={setMetaCustomFields}
-              />
-            </div>
-            <div style={{ gridColumn: "1 / -1" }}>
-              <JsonPreview obj={metaObj} label="Updated Metadata Preview" />
-            </div>
-            <div style={{ gridColumn: "1 / -1" }}>
-              <button className="btn btn-primary" onClick={updateMetadata} disabled={txPending || !walletAddress} style={{ width: "100%" }}>
-                {txPending ? "Sending Transaction..." : "Update Metadata"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Detail panel */}
-      {selected && (
-        <div className="card" style={{ marginBottom: "20px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-            <h3>Identity Detail</h3>
-            <div style={{ display: "flex", gap: "8px" }}>
-              {selected.statusId !== 2 && (
-                <button className="btn" onClick={() => openStatusModal(selected)}>
-                  {selected.statusId === 0 ? "Suspend" : "Reactivate"}
-                </button>
-              )}
-              {selected.statusId !== 2 && (
-                <button className="btn btn-danger" onClick={() => { setStatusTarget(selected.address); setStatusValue(2); setModal("updateStatus"); }}>
-                  Revoke
-                </button>
-              )}
-              <button className="btn" onClick={() => openMetaModal(selected)}>
-                Update Metadata
-              </button>
-              <button className="btn" onClick={() => setSelected(null)}>Close</button>
-            </div>
-          </div>
-          <div className="detail-grid">
-            <div className="label">DID</div>
-            <div className="value mono">{selected.did}</div>
-            <div className="label">Address</div>
-            <div className="value mono">{selected.address}</div>
-            <div className="label">Type</div>
-            <div className="value">
-              <span className={`badge badge-${selected.entityType === "Human" ? "human" : selected.entityType === "Organization" ? "org" : "agent"}`}>
-                {selected.entityType}
-              </span>
-            </div>
-            <div className="label">Status</div>
-            <div className="value">
-              <span className={`badge badge-${selected.status.toLowerCase()}`}>{selected.status}</span>
-            </div>
-            <div className="label">Owner</div>
-            <div className="value mono">{selected.owner}</div>
-            <div className="label">Created</div>
-            <div className="value">{new Date(selected.createdAt * 1000).toLocaleString()}</div>
-            <div className="label">Metadata Hash</div>
-            <div className="value mono" style={{ wordBreak: "break-all" }}>{selected.metadataHash}</div>
-          </div>
-        </div>
-      )}
-
-      {/* Search & filter */}
-      <div className="search-bar">
-        <input type="text" placeholder="Search by address (0x...) or DID..." value={search} onChange={(e) => setSearch(e.target.value)} onKeyDown={(e) => e.key === "Enter" && lookupAddress()} />
-        <select value={filterType} onChange={(e) => setFilterType(e.target.value)}>
-          <option value="all">All Types</option>
-          <option value="Human">Human</option>
-          <option value="VirtualAgent">Virtual Agent</option>
-          <option value="PhysicalAgent">Physical Agent</option>
-          <option value="Organization">Organization</option>
-        </select>
-        <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
-          <option value="all">All Statuses</option>
-          <option value="Active">Active</option>
-          <option value="Suspended">Suspended</option>
-          <option value="Revoked">Revoked</option>
-        </select>
-        <button className="btn btn-primary" onClick={lookupAddress}>Lookup</button>
+        )}
       </div>
 
-      {/* Table */}
-      {filtered.length === 0 ? (
-        <div className="empty-state">
-          <h3>No Identities Found</h3>
-          <p>{identities.length === 0 ? "No identities registered on-chain yet. Connect your wallet and register." : "No identities match your filters."}</p>
+      {/* ===== MY AGENTS ===== */}
+      <div style={{ marginBottom: 28 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <h2 style={{ fontSize: 18, fontWeight: 700 }}>My Agents ({mergedAgents.length + localOnlyAgents.length})</h2>
+          <button
+            className="btn"
+            onClick={() => setShowCreateAgent(!showCreateAgent)}
+            style={{ display: "flex", alignItems: "center", gap: 6 }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            Add Agent
+          </button>
         </div>
-      ) : (
-        <div className="card">
-          <table>
-            <thead>
-              <tr>
-                <th>Address</th>
-                <th>DID</th>
-                <th>Type</th>
-                <th>Status</th>
-                <th>Owner</th>
-                <th>Created</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((id) => (
-                <tr key={id.address} style={{ cursor: "pointer" }} onClick={() => setSelected(id)}>
-                  <td className="mono">{id.address.slice(0, 6)}...{id.address.slice(-4)}</td>
-                  <td className="mono" style={{ fontSize: "12px" }}>did:nexoid:eth:{id.address.slice(0, 6)}...</td>
-                  <td>
-                    <span className={`badge badge-${id.entityType === "Human" ? "human" : id.entityType === "Organization" ? "org" : "agent"}`}>
-                      {id.entityType}
-                    </span>
-                  </td>
-                  <td><span className={`badge badge-${id.status.toLowerCase()}`}>{id.status}</span></td>
-                  <td className="mono">{id.owner.slice(0, 6)}...{id.owner.slice(-4)}</td>
-                  <td>{new Date(id.createdAt * 1000).toLocaleDateString()}</td>
-                  <td>
-                    <button className="btn" onClick={(e) => { e.stopPropagation(); setSelected(id); }}>View</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+
+        {/* Create Agent expandable */}
+        {showCreateAgent && (
+          <div className="card" style={{ marginBottom: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h3 style={{ fontSize: 15, fontWeight: 600 }}>Create Agent</h3>
+              <button className="btn" style={{ padding: "4px 10px", fontSize: 12 }} onClick={() => setShowCreateAgent(false)}>Cancel</button>
+            </div>
+            <p style={{ color: "var(--text-muted)", fontSize: "13px", marginBottom: "16px" }}>
+              Create a new AI agent identity. You can use an existing EOA or generate a new key pair.
+            </p>
+
+            {/* Mode toggle */}
+            <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+              <button className={`btn ${agentMode === "generate" ? "btn-primary" : ""}`} onClick={() => setAgentMode("generate")}>
+                Generate New Key
+              </button>
+              <button className={`btn ${agentMode === "existing" ? "btn-primary" : ""}`} onClick={() => setAgentMode("existing")}>
+                Use Existing EOA
+              </button>
+            </div>
+
+            {/* Generate Key */}
+            {agentMode === "generate" && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
+                  <button className="btn btn-primary" onClick={generateMnemonic} disabled={generating}>
+                    {generating ? "Generating..." : seedPhrase ? "Regenerate Mnemonic" : "Generate Mnemonic"}
+                  </button>
+                </div>
+
+                {seedPhrase && (
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ background: "var(--bg-input)", border: "1px solid var(--warning)", borderRadius: "var(--radius-sm)", padding: 16, marginBottom: 12 }}>
+                      <div style={{ fontSize: 12, color: "var(--warning)", fontWeight: 600, marginBottom: 8, textTransform: "uppercase" }}>
+                        Save this seed phrase securely — it cannot be recovered
+                      </div>
+                      <div className="mono" style={{ fontSize: 13, lineHeight: 1.8, wordBreak: "break-word" }}>
+                        {seedPhrase}
+                      </div>
+                    </div>
+
+                    <div style={{ display: "flex", gap: 12, alignItems: "flex-end" }}>
+                      <div>
+                        <label style={fieldLabel}>Agent Index (1+)</label>
+                        <input type="number" value={agentIndex} onChange={(e) => setAgentIndex(e.target.value)} min="1" style={{ width: 100 }} />
+                      </div>
+                      <button className="btn btn-primary" onClick={deriveAgentKey} disabled={generating}>
+                        {generating ? "Deriving..." : "Derive Agent Key"}
+                      </button>
+                    </div>
+
+                    {derivedAgent && (
+                      <div style={{ marginTop: 12, background: "var(--bg-input)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: 16 }}>
+                        <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>Derived Address:</div>
+                        <div className="mono" style={{ fontSize: 13, marginBottom: 8 }}>{derivedAgent.address}</div>
+                        <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>Private Key:</div>
+                        <div className="mono" style={{ fontSize: 13, wordBreak: "break-all" }}>{derivedAgent.privateKey}</div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Existing EOA */}
+            {agentMode === "existing" && (
+              <div style={{ marginBottom: 16 }}>
+                <label style={fieldLabel}>Agent EOA Address *</label>
+                <input type="text" placeholder="0x..." value={agentAddress} onChange={(e) => setAgentAddress(e.target.value)} style={{ width: "100%" }} className="mono" />
+              </div>
+            )}
+
+            {/* Agent Label */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={fieldLabel}>Label</label>
+              <input type="text" placeholder="e.g. trading-bot-1" value={agentLabel} onChange={(e) => setAgentLabel(e.target.value)} style={{ width: "100%" }} />
+            </div>
+
+            {/* Deploy Safe toggle */}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                <input type="checkbox" checked={deployAgentSafe} onChange={(e) => setDeployAgentSafe(e.target.checked)} />
+                <span style={{ fontSize: 13 }}>Deploy Agent Safe (1-of-1 with AllowanceModule)</span>
+              </label>
+            </div>
+
+            <button
+              className="btn btn-primary"
+              onClick={handleCreateAgent}
+              disabled={txPending || !walletAddress || !agentAddress}
+              style={{ width: "100%", marginTop: 16 }}
+            >
+              {txPending ? "Creating Agent..." : `Create Agent${deployAgentSafe ? " + Deploy Safe" : ""}`}
+            </button>
+
+            {/* Step-by-step progress indicator */}
+            {txPending && creationStep !== null && (() => {
+              const steps: { label: string; description: string; show: boolean }[] = [
+                { label: "Deploy Agent Safe", description: "createProxyWithNonce", show: deployAgentSafe },
+                { label: "Enable AllowanceModule", description: "execTransaction on Safe", show: deployAgentSafe },
+                { label: "Register Agent Identity", description: "createAgentIdentity on IdentityRegistry", show: true },
+                { label: "Register on NexoidModule", description: "registerAgentSafe", show: !!nexoidModuleAddress },
+                { label: "Complete", description: "Saved to localStorage", show: true },
+              ];
+              const visibleSteps = steps.filter((s) => s.show);
+              // Map creationStep (0-4 absolute) to visible index
+              const visibleIndex = steps.slice(0, creationStep + 1).filter((s) => s.show).length - 1;
+
+              return (
+                <div style={{
+                  marginTop: 16,
+                  padding: 16,
+                  background: "var(--bg-input)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "var(--radius-sm)",
+                }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12, color: "var(--text-secondary)" }}>
+                    Progress
+                  </div>
+                  {visibleSteps.map((step, i) => {
+                    const isCompleted = i < visibleIndex || (i === visibleIndex && creationStep === 4);
+                    const isCurrent = i === visibleIndex && creationStep !== 4;
+
+                    return (
+                      <div key={i} style={{
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: 10,
+                        marginBottom: i < visibleSteps.length - 1 ? 8 : 0,
+                        padding: "6px 0",
+                      }}>
+                        {/* Status icon */}
+                        <div style={{
+                          width: 22,
+                          height: 22,
+                          borderRadius: "50%",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          flexShrink: 0,
+                          fontSize: 12,
+                          fontWeight: 700,
+                          ...(isCompleted
+                            ? { background: "var(--success)", color: "#fff" }
+                            : isCurrent
+                              ? { background: "transparent", border: "2px solid var(--accent)", color: "var(--accent)" }
+                              : { background: "transparent", border: "2px solid var(--border)", color: "var(--text-muted)" }
+                          ),
+                        }}>
+                          {isCompleted ? "\u2713" : isCurrent ? (
+                            <span style={{
+                              display: "inline-block",
+                              width: 8,
+                              height: 8,
+                              borderRadius: "50%",
+                              background: "var(--accent)",
+                              animation: "pulse 1.5s ease-in-out infinite",
+                            }} />
+                          ) : (
+                            <span style={{ fontSize: 11 }}>{i + 1}</span>
+                          )}
+                        </div>
+                        {/* Step text */}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{
+                            fontSize: 13,
+                            fontWeight: isCurrent ? 600 : 400,
+                            color: isCompleted
+                              ? "var(--success)"
+                              : isCurrent
+                                ? "var(--text-primary)"
+                                : "var(--text-muted)",
+                          }}>
+                            {step.label}
+                            {isCurrent && (
+                              <span style={{ fontWeight: 400, fontSize: 12, marginLeft: 6, color: "var(--text-muted)" }}>
+                                — waiting for signature...
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 1 }}>
+                            {step.description}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }`}</style>
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
+        {/* Agent cards */}
+        {agentsLoading ? (
+          <div className="loading">Loading agents from NexoidModule...</div>
+        ) : mergedAgents.length > 0 || localOnlyAgents.length > 0 ? (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 16 }}>
+            {/* On-chain agents */}
+            {mergedAgents.map((agent) => {
+              const isExpired = agent.validUntil > 0 && agent.validUntil < Date.now() / 1000;
+              const isValid = agent.status === 0 && !isExpired;
+              return (
+                <div key={agent.agentSafe} className="card" style={{ padding: 20 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+                    <div style={{
+                      width: 40, height: 40, borderRadius: "var(--radius-sm)",
+                      background: isValid ? "var(--success-soft)" : "var(--danger-soft)",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                    }}>
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={isValid ? "var(--success)" : "var(--danger)"} strokeWidth="2">
+                        <rect x="3" y="11" width="18" height="10" rx="2" />
+                        <circle cx="12" cy="5" r="3" />
+                      </svg>
+                    </div>
+                    <span className={`badge badge-${agent.statusName.toLowerCase()}`}>{agent.statusName}</span>
+                  </div>
+                  <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>
+                    {agent.local?.label || `did:nexoid:eth:${agent.agentEOA.slice(0, 8)}...`}
+                  </div>
+                  <div className="mono" style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>
+                    Safe: {agent.agentSafe.slice(0, 10)}...{agent.agentSafe.slice(-4)}
+                  </div>
+                  <div className="mono" style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>
+                    EOA: {agent.agentEOA.slice(0, 10)}...{agent.agentEOA.slice(-4)}
+                  </div>
+                  {agent.validUntil > 0 && (
+                    <div style={{ fontSize: 12, color: isExpired ? "var(--danger)" : "var(--text-muted)", marginBottom: 4 }}>
+                      {isExpired ? "Expired" : `Valid until ${new Date(agent.validUntil * 1000).toLocaleDateString()}`}
+                    </div>
+                  )}
+                  <div style={{ paddingTop: 12, marginTop: 8, borderTop: "1px solid var(--border)", display: "flex", gap: 8 }}>
+                    <button
+                      className="btn"
+                      style={{ fontSize: 11, padding: "4px 10px" }}
+                      onClick={() => {
+                        const config = [
+                          `AGENT_ADDRESS=${agent.agentEOA}`,
+                          `AGENT_SAFE_ADDRESS=${agent.agentSafe}`,
+                          agent.local?.mnemonic ? `AGENT_MNEMONIC="${agent.local.mnemonic}"` : "",
+                          agent.local?.mnemonicIndex !== undefined ? `AGENT_MNEMONIC_INDEX=${agent.local.mnemonicIndex}` : "",
+                        ].filter(Boolean).join("\n");
+                        navigator.clipboard.writeText(config);
+                        showSuccess("Agent config copied to clipboard.");
+                      }}
+                    >
+                      Copy nxcli Config
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Local-only agents (not yet on-chain) */}
+            {localOnlyAgents.map((agent) => (
+              <div key={agent.address} className="card" style={{ padding: 20 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+                  <div style={{
+                    width: 40, height: 40, borderRadius: "var(--radius-sm)",
+                    background: "var(--cyan-soft)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                  }}>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="2">
+                      <rect x="3" y="11" width="18" height="10" rx="2" />
+                      <circle cx="12" cy="5" r="3" />
+                    </svg>
+                  </div>
+                  <span className="badge" style={{ background: "var(--accent-soft)", color: "var(--text-muted)" }}>Local Only</span>
+                </div>
+                <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>{agent.label}</div>
+                <div className="mono" style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>
+                  EOA: {agent.address.slice(0, 10)}...{agent.address.slice(-4)}
+                </div>
+                {agent.safeAddress && (
+                  <div className="mono" style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>
+                    Safe: {agent.safeAddress.slice(0, 10)}...{agent.safeAddress.slice(-4)}
+                  </div>
+                )}
+                <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8 }}>
+                  Created: {new Date(agent.createdAt).toLocaleDateString()}
+                </div>
+                <div style={{ paddingTop: 12, borderTop: "1px solid var(--border)", display: "flex", gap: 8 }}>
+                  <button
+                    className="btn"
+                    style={{ fontSize: 11, padding: "4px 10px" }}
+                    onClick={() => {
+                      const config = [
+                        `AGENT_ADDRESS=${agent.address}`,
+                        agent.safeAddress ? `AGENT_SAFE_ADDRESS=${agent.safeAddress}` : "",
+                        agent.mnemonic ? `AGENT_MNEMONIC="${agent.mnemonic}"` : "",
+                        agent.mnemonicIndex !== undefined ? `AGENT_MNEMONIC_INDEX=${agent.mnemonicIndex}` : "",
+                      ].filter(Boolean).join("\n");
+                      navigator.clipboard.writeText(config);
+                      showSuccess("Agent config copied to clipboard.");
+                    }}
+                  >
+                    Copy nxcli Config
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : !showCreateAgent ? (
+          <div className="card" style={{ padding: 32, textAlign: "center" }}>
+            <div style={{ color: "var(--text-muted)", marginBottom: 8 }}>
+              {getSafeAddress() ? "No agents registered on-chain for this Safe." : "Configure your Safe address in Settings to load agents."}
+            </div>
+            <button className="btn btn-primary" onClick={() => setShowCreateAgent(true)}>Create your first agent</button>
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }

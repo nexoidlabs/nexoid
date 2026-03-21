@@ -43,7 +43,42 @@ export const IDENTITY_REGISTRY_ABI = [
     outputs: [{ name: "", type: "address" }],
     stateMutability: "view",
   },
+  {
+    type: "function",
+    name: "admin",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "isRegistrar",
+    inputs: [{ name: "addr", type: "address" }],
+    outputs: [{ name: "", type: "bool" }],
+    stateMutability: "view",
+  },
   // --- Write functions ---
+  {
+    type: "function",
+    name: "setRegistrar",
+    inputs: [
+      { name: "registrar", type: "address" },
+      { name: "authorized", type: "bool" },
+    ],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    name: "registerIdentityFor",
+    inputs: [
+      { name: "identity", type: "address" },
+      { name: "entityType", type: "uint8" },
+      { name: "metadataHash", type: "bytes32" },
+    ],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
   {
     type: "function",
     name: "registerIdentity",
@@ -175,6 +210,124 @@ export const ERC20_ABI = [
 ] as const;
 
 export const ALLOWANCE_MODULE_ADDRESS = "0xCFbFaC74C26F8647cBDb8c5caf80BB5b32E43134" as Address;
+
+// Safe v1.3.0 deployment addresses (same across all EVM chains)
+export const SAFE_PROXY_FACTORY = "0xa6B71E26C5e0845f74c812102Ca7114b6a896AB2" as Address;
+export const SAFE_SINGLETON = "0xd9Db270c1B5E3Bd161E8c8503c55cEABeE709552" as Address;
+export const SAFE_FALLBACK_HANDLER = "0xf48f2B2d2a534e402487b3ee7C18c33Aec0Fe5e4" as Address;
+
+// Safe ProxyFactory ABI (minimal)
+export const SAFE_PROXY_FACTORY_ABI = [
+  {
+    type: "function",
+    name: "createProxyWithNonce",
+    inputs: [
+      { name: "_singleton", type: "address" },
+      { name: "initializer", type: "bytes" },
+      { name: "saltNonce", type: "uint256" },
+    ],
+    outputs: [{ name: "proxy", type: "address" }],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "event",
+    name: "ProxyCreation",
+    inputs: [
+      { name: "proxy", type: "address", indexed: false },
+      { name: "singleton", type: "address", indexed: false },
+    ],
+  },
+] as const;
+
+// Safe ABI (minimal — setup, enableModule, execTransaction, isModuleEnabled)
+export const SAFE_ABI = [
+  {
+    type: "function",
+    name: "setup",
+    inputs: [
+      { name: "_owners", type: "address[]" },
+      { name: "_threshold", type: "uint256" },
+      { name: "to", type: "address" },
+      { name: "data", type: "bytes" },
+      { name: "fallbackHandler", type: "address" },
+      { name: "paymentToken", type: "address" },
+      { name: "payment", type: "uint256" },
+      { name: "paymentReceiver", type: "address" },
+    ],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    name: "enableModule",
+    inputs: [{ name: "module", type: "address" }],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    name: "isModuleEnabled",
+    inputs: [{ name: "module", type: "address" }],
+    outputs: [{ name: "", type: "bool" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "getOwners",
+    inputs: [],
+    outputs: [{ name: "", type: "address[]" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "execTransaction",
+    inputs: [
+      { name: "to", type: "address" },
+      { name: "value", type: "uint256" },
+      { name: "data", type: "bytes" },
+      { name: "operation", type: "uint8" },
+      { name: "safeTxGas", type: "uint256" },
+      { name: "baseGas", type: "uint256" },
+      { name: "gasPrice", type: "uint256" },
+      { name: "gasToken", type: "address" },
+      { name: "refundReceiver", type: "address" },
+      { name: "signatures", type: "bytes" },
+    ],
+    outputs: [{ name: "success", type: "bool" }],
+    stateMutability: "payable",
+  },
+  {
+    type: "function",
+    name: "nonce",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+    stateMutability: "view",
+  },
+] as const;
+
+// AllowanceModule write ABI (for onboarding — addDelegate + setAllowance)
+export const ALLOWANCE_MODULE_WRITE_ABI = [
+  {
+    type: "function",
+    name: "addDelegate",
+    inputs: [{ name: "delegate", type: "address" }],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    name: "setAllowance",
+    inputs: [
+      { name: "delegate", type: "address" },
+      { name: "token", type: "address" },
+      { name: "allowanceAmount", type: "uint96" },
+      { name: "resetTimeMin", type: "uint16" },
+      { name: "resetBaseMin", type: "uint32" },
+    ],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+] as const;
 
 // NexoidModule ABI for agent management
 export const NEXOID_MODULE_ABI = [
@@ -367,7 +520,8 @@ export function getModuleAddress(): Address {
 }
 
 export function getNexoidModuleAddress(): Address | undefined {
-  return process.env.NEXT_PUBLIC_NEXOID_MODULE_ADDRESS as Address | undefined;
+  return (process.env.NEXT_PUBLIC_NEXOID_MODULE_ADDRESS ??
+    process.env.NEXT_PUBLIC_MODULE_ADDRESS) as Address | undefined;
 }
 
 export function getPublicClient(): PublicClient {
