@@ -45,6 +45,7 @@ packages/
 apps/
   nx-platform/    — Operator dashboard (Next.js)
   nx-verify/      — Public identity explorer & proof verifier (Next.js)
+  nx-wallet/      — Mobile wallet app (React Native / Expo, WDK + Safe)
 scripts/          — Demo setup scripts (01-07)
 demo/             — Agent demo scenario
 ```
@@ -68,6 +69,9 @@ cd apps/nx-platform && pnpm dev   # http://localhost:3100
 
 # Start the identity explorer
 cd apps/nx-verify && pnpm dev     # http://localhost:3200
+
+# Start the mobile wallet (Expo)
+cd apps/nx-wallet && npx expo start
 ```
 
 ## CLI Usage
@@ -109,6 +113,7 @@ nxcli request-funds --amount 500 --reason "API subscription payment"
 | Client SDK | TypeScript, viem v2.21 |
 | CLI | Commander.js, chalk |
 | Dashboard | Next.js 15, React 19, viem |
+| Mobile Wallet | React Native (Expo 54), WDK + Safe Protocol Kit, ethers.js v6 |
 | Chain | Ethereum Mainnet / Sepolia |
 | Token | USDT (Tether USD) |
 
@@ -134,12 +139,3 @@ tsx scripts/05-deploy-safe.ts
 tsx scripts/06-set-allowances.ts
 tsx scripts/07-fund-agents-eth.ts
 ```
-
-Then run the agent demo:
-```bash
-tsx demo/agent-scenario.ts
-```
-
-## License
-
-MIT
