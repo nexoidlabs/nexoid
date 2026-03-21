@@ -49,7 +49,7 @@ const AVAILABLE_TOOLS = [
 ] as const;
 
 export default function DelegationsPage() {
-  const { address: walletAddress, walletClient, publicClient, chain } = useWallet();
+  const { address: walletAddress, walletClient, publicClient, chain, network } = useWallet();
   const [agents, setAgents] = useState<AgentScope[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -92,17 +92,17 @@ export default function DelegationsPage() {
       const all: AgentScope[] = [];
       const queried = new Set<string>();
 
-      const storedSafe = getSafeAddress();
+      const storedSafe = getSafeAddress(network);
       if (storedSafe) {
         queried.add(storedSafe.toLowerCase());
-        const res = await fetch(`/api/delegations?operator=${storedSafe}`);
+        const res = await fetch(`/api/delegations?operator=${storedSafe}&network=${network}`);
         const data = await res.json();
         if (data.agents) all.push(...data.agents);
       }
 
       // Also query with EOA (registerAgentSafe uses msg.sender which is the EOA)
       if (walletAddress && !queried.has(walletAddress.toLowerCase())) {
-        const res = await fetch(`/api/delegations?operator=${walletAddress}`);
+        const res = await fetch(`/api/delegations?operator=${walletAddress}&network=${network}`);
         const data = await res.json();
         if (data.agents) all.push(...data.agents);
       }
@@ -113,11 +113,11 @@ export default function DelegationsPage() {
     } finally {
       setLoading(false);
     }
-  }, [walletAddress]);
+  }, [walletAddress, network]);
 
   useEffect(() => {
     loadAgents();
-    setLocalAgents(getStoredAgents());
+    setLocalAgents(getStoredAgents(network));
   }, [loadAgents]);
 
   const showSuccess = (msg: string) => {
@@ -133,7 +133,7 @@ export default function DelegationsPage() {
     if (!search.startsWith("0x") || search.length !== 42) return;
     setLoading(true);
     try {
-      const res = await fetch(`/api/delegations?agent=${search}`);
+      const res = await fetch(`/api/delegations?agent=${search}&network=${network}`);
       const data = await res.json();
       if (data.agent) setSelected(data.agent);
       else showError(data.error ?? "Agent not found");

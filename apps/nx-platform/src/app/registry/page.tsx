@@ -36,8 +36,8 @@ const fieldLabel: React.CSSProperties = {
 };
 
 export default function RegistryPage() {
-  const { address: walletAddress, walletClient, publicClient, chain } = useWallet();
-  const registryAddress = getRegistryAddress();
+  const { address: walletAddress, walletClient, publicClient, chain, network } = useWallet();
+  const registryAddress = getRegistryAddress(network);
 
   // Access control
   const [isAdmin, setIsAdmin] = useState(false);
@@ -116,14 +116,14 @@ export default function RegistryPage() {
   // Load identities
   const loadIdentities = () => {
     setLoading(true);
-    fetch("/api/identities")
+    fetch(`/api/identities?network=${network}`)
       .then((r) => r.json())
       .then((data) => setIdentities(data.identities ?? []))
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { loadIdentities(); }, []);
+  useEffect(() => { loadIdentities(); }, [network]);
 
   // Metadata object
   const regMetadataObj = useMemo(() => {

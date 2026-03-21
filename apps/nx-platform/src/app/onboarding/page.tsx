@@ -27,7 +27,7 @@ import {
   decodeEventLog,
   zeroAddress,
 } from "viem";
-import { setSafeAddress as storeSafeAddress, addLinkedDid, addStoredAgent } from "@/lib/storage";
+import { getSafeAddress, setSafeAddress as storeSafeAddress, addLinkedDid, addStoredAgent } from "@/lib/storage";
 
 // ---- Types ----
 
@@ -65,12 +65,13 @@ export default function OnboardingPage() {
     walletClient,
     publicClient,
     chain,
+    network,
     connect,
   } = useWallet();
 
-  const registryAddress = getRegistryAddress();
-  const nexoidModuleAddress = getNexoidModuleAddress();
-  const tokenAddress = getTokenAddress();
+  const registryAddress = getRegistryAddress(network);
+  const nexoidModuleAddress = getNexoidModuleAddress(network);
+  const tokenAddress = getTokenAddress(network);
 
   // Step state
   const [steps, setSteps] = useState<Record<string, StepState>>({
@@ -137,7 +138,7 @@ export default function OnboardingPage() {
       }
 
       // Check for existing Safe in localStorage
-      const storedSafe = localStorage.getItem("nexoid-safe-address");
+      const storedSafe = getSafeAddress(network);
       if (storedSafe) {
         try {
           const { SAFE_ABI: safeAbi } = await import("@/lib/contracts");
@@ -168,7 +169,7 @@ export default function OnboardingPage() {
         }
       }
     })();
-  }, [walletAddress, publicClient, registryAddress, updateStep]);
+  }, [walletAddress, publicClient, registryAddress, network, updateStep]);
 
   // ---- Step 2: Add DID ----
   async function handleAddDid() {
@@ -216,7 +217,7 @@ export default function OnboardingPage() {
         address: didAddress,
         entityType: ENTITY_TYPES[identity.entityType] ?? "Unknown",
         linkedAt: Date.now(),
-      });
+      }, network);
 
       setIsRegistered(true);
       updateStep("identity", { status: "complete" });
@@ -311,7 +312,7 @@ export default function OnboardingPage() {
 
       setSafeAddress(newSafeAddress);
       setModuleEnabled(true);
-      storeSafeAddress(newSafeAddress);
+      storeSafeAddress(newSafeAddress, network);
 
       updateStep("safe", { status: "complete", txHash: deployTx });
       updateStep("agent", { status: "active" });
@@ -406,7 +407,7 @@ export default function OnboardingPage() {
         mnemonic: seedPhrase || undefined,
         mnemonicIndex: seedPhrase ? 1 : undefined,
         createdAt: Date.now(),
-      });
+      }, network);
 
       updateStep("agent", { status: "complete", txHash: tx1 });
       updateStep("allowance", { status: "active" });

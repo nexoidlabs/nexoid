@@ -15,9 +15,10 @@ function sanitizeError(msg: string): string {
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const address = searchParams.get("address");
+  const network = searchParams.get("network") ?? undefined;
 
-  const client = getPublicClient();
-  const registryAddress = getRegistryAddress();
+  const client = getPublicClient(network);
+  const registryAddress = getRegistryAddress(network);
 
   // Single identity lookup
   if (address) {

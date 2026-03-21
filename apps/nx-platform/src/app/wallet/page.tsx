@@ -56,7 +56,7 @@ function buildPreApprovedSig(owner: Address): Hex {
 }
 
 export default function WalletPage() {
-  const { address: walletAddress, walletClient, publicClient, chain } = useWallet();
+  const { address: walletAddress, walletClient, publicClient, chain, network } = useWallet();
   const [data, setData] = useState<WalletData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -79,7 +79,7 @@ export default function WalletPage() {
     setLoading(true);
     setError("");
     try {
-      let url = `/api/wallet?safe=${safeAddr}&type=operator`;
+      let url = `/api/wallet?safe=${safeAddr}&type=operator&network=${network}`;
       if (eoa) url += `&eoa=${eoa}`;
       const res = await fetch(url);
       const json = await res.json();
@@ -91,12 +91,12 @@ export default function WalletPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [network]);
 
   useEffect(() => {
-    const stored = getSafeAddress();
+    const stored = getSafeAddress(network);
     if (stored) fetchWallet(stored, walletAddress ?? undefined);
-  }, [fetchWallet, walletAddress]);
+  }, [fetchWallet, walletAddress, network]);
 
   // --- HTML5 Drag handlers ---
 
@@ -186,7 +186,7 @@ export default function WalletPage() {
 
       setTransferSuccess(`Transferred ${transferAmount} USDT`);
       setTransferAmount("");
-      const stored = getSafeAddress();
+      const stored = getSafeAddress(network);
       if (stored) fetchWallet(stored, walletAddress ?? undefined);
     } catch (e) {
       setError(e instanceof Error ? e.message.slice(0, 200) : "Transfer failed");

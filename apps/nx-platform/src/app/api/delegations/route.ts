@@ -15,9 +15,10 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const agentAddress = searchParams.get("agent");
   const operator = searchParams.get("operator");
+  const network = searchParams.get("network") ?? undefined;
 
-  const client = getPublicClient();
-  const moduleAddress = getModuleAddress();
+  const client = getPublicClient(network);
+  const moduleAddress = getModuleAddress(network);
 
   // Single agent lookup
   if (agentAddress) {

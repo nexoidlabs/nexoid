@@ -85,9 +85,9 @@ interface OnChainAgent {
 // --- Component ---
 
 export default function IdentitiesPage() {
-  const { address: walletAddress, walletClient, publicClient, chain } = useWallet();
-  const registryAddress = getRegistryAddress();
-  const nexoidModuleAddress = getNexoidModuleAddress();
+  const { address: walletAddress, walletClient, publicClient, chain, network } = useWallet();
+  const registryAddress = getRegistryAddress(network);
+  const nexoidModuleAddress = getNexoidModuleAddress(network);
 
   // My identities from on-chain
   const [identities, setIdentities] = useState<IdentityInfo[]>([]);
@@ -149,12 +149,12 @@ export default function IdentitiesPage() {
 
   // Load data on mount and when wallet connects
   useEffect(() => {
-    setLinkedDids(getLinkedDids());
-    setStoredAgents(getStoredAgents());
+    setLinkedDids(getLinkedDids(network));
+    setStoredAgents(getStoredAgents(network));
     loadIdentities();
     loadOnChainAgents();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [walletAddress]);
+  }, [walletAddress, network]);
 
   const showSuccess = useCallback((msg: string) => { setSuccess(msg); setTimeout(() => setSuccess(null), 5000); }, []);
   const showError = useCallback((msg: string) => { setError(msg); setTimeout(() => setError(null), 8000); }, []);
@@ -164,7 +164,7 @@ export default function IdentitiesPage() {
     setIdentitiesLoading(true);
     try {
       // Get identities linked to this wallet via linked DIDs
-      const dids = getLinkedDids();
+      const dids = getLinkedDids(network);
       const results: IdentityInfo[] = [];
 
       for (const d of dids) {
@@ -213,17 +213,17 @@ export default function IdentitiesPage() {
       const all: OnChainAgent[] = [];
       const queried = new Set<string>();
 
-      const safeAddr = getSafeAddress();
+      const safeAddr = getSafeAddress(network);
       if (safeAddr) {
         queried.add(safeAddr.toLowerCase());
-        const res = await fetch(`/api/delegations?operator=${safeAddr}`);
+        const res = await fetch(`/api/delegations?operator=${safeAddr}&network=${network}`);
         const data = await res.json();
         if (data.agents) all.push(...data.agents);
       }
 
       // Also query with the connected wallet EOA (msg.sender for direct calls)
       if (walletAddress && !queried.has(walletAddress.toLowerCase())) {
-        const res = await fetch(`/api/delegations?operator=${walletAddress}`);
+        const res = await fetch(`/api/delegations?operator=${walletAddress}&network=${network}`);
         const data = await res.json();
         if (data.agents) all.push(...data.agents);
       }
@@ -311,8 +311,8 @@ export default function IdentitiesPage() {
       address: didVerifyResult.address,
       entityType: didVerifyResult.entityType,
       linkedAt: Date.now(),
-    });
-    setLinkedDids(getLinkedDids());
+    }, network);
+    setLinkedDids(getLinkedDids(network));
     setDidInput("");
     setDidVerifyResult(null);
     setShowLinkDid(false);
@@ -321,8 +321,8 @@ export default function IdentitiesPage() {
   };
 
   const unlinkDid = (did: string) => {
-    removeLinkedDid(did);
-    setLinkedDids(getLinkedDids());
+    removeLinkedDid(did, network);
+    setLinkedDids(getLinkedDids(network));
     loadIdentities();
   };
 
@@ -477,8 +477,8 @@ export default function IdentitiesPage() {
         mnemonic: seedPhrase || undefined,
         mnemonicIndex: seedPhrase ? parseInt(agentIndex) : undefined,
         createdAt: Date.now(),
-      });
-      setStoredAgents(getStoredAgents());
+      }, network);
+      setStoredAgents(getStoredAgents(network));
       setShowCreateAgent(false);
       loadOnChainAgents();
 
@@ -1073,7 +1073,7 @@ export default function IdentitiesPage() {
         ) : !showCreateAgent ? (
           <div className="card" style={{ padding: 32, textAlign: "center" }}>
             <div style={{ color: "var(--text-muted)", marginBottom: 8 }}>
-              {getSafeAddress() ? "No agents registered on-chain for this Safe." : "Configure your Safe address in Settings to load agents."}
+              {getSafeAddress(network) ? "No agents registered on-chain for this Safe." : "Configure your Safe address in Settings to load agents."}
             </div>
             <button className="btn btn-primary" onClick={() => setShowCreateAgent(true)}>Create your first agent</button>
           </div>

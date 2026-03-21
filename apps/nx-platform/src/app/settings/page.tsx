@@ -2,25 +2,27 @@
 
 import { useState, useEffect } from "react";
 import { getSafeAddress, setSafeAddress as storeSafeAddress, clearSafeAddress } from "@/lib/storage";
+import { useWallet } from "@/lib/wallet";
 
 export default function SettingsPage() {
+  const { network } = useWallet();
   const [safeAddress, setSafeAddress] = useState("");
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    const stored = getSafeAddress();
+    const stored = getSafeAddress(network);
     if (stored) setSafeAddress(stored);
-  }, []);
+  }, [network]);
 
   const handleSave = () => {
     if (!safeAddress) return;
-    storeSafeAddress(safeAddress);
+    storeSafeAddress(safeAddress, network);
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
   };
 
   const handleClear = () => {
-    clearSafeAddress();
+    clearSafeAddress(network);
     setSafeAddress("");
     setSaved(false);
   };

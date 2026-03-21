@@ -1,11 +1,13 @@
 // Centralized typed localStorage persistence for Nexoid platform
-// All keys use `nexoid-` prefix with hyphens
+// All keys use `nexoid-` prefix with hyphens, scoped by network
 
-const KEYS = {
-  safeAddress: "nexoid-safe-address",
-  linkedDids: "nexoid-linked-dids",
-  agents: "nexoid-agents",
-} as const;
+function getKeys(network: string) {
+  return {
+    safeAddress: `nexoid-safe-address-${network}`,
+    linkedDids: `nexoid-linked-dids-${network}`,
+    agents: `nexoid-agents-${network}`,
+  };
+}
 
 // --- Types ---
 
@@ -27,65 +29,65 @@ export interface StoredAgent {
 
 // --- Safe Address ---
 
-export function getSafeAddress(): string | null {
+export function getSafeAddress(network: string): string | null {
   if (typeof window === "undefined") return null;
-  return localStorage.getItem(KEYS.safeAddress) || null;
+  return localStorage.getItem(getKeys(network).safeAddress) || null;
 }
 
-export function setSafeAddress(address: string): void {
-  localStorage.setItem(KEYS.safeAddress, address);
+export function setSafeAddress(address: string, network: string): void {
+  localStorage.setItem(getKeys(network).safeAddress, address);
 }
 
-export function clearSafeAddress(): void {
-  localStorage.removeItem(KEYS.safeAddress);
+export function clearSafeAddress(network: string): void {
+  localStorage.removeItem(getKeys(network).safeAddress);
 }
 
 // --- Linked DIDs ---
 
-export function getLinkedDids(): LinkedDid[] {
+export function getLinkedDids(network: string): LinkedDid[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = localStorage.getItem(KEYS.linkedDids);
+    const raw = localStorage.getItem(getKeys(network).linkedDids);
     return raw ? JSON.parse(raw) : [];
   } catch {
     return [];
   }
 }
 
-export function addLinkedDid(did: LinkedDid): void {
-  const dids = getLinkedDids().filter((d) => d.did !== did.did);
+export function addLinkedDid(did: LinkedDid, network: string): void {
+  const dids = getLinkedDids(network).filter((d) => d.did !== did.did);
   dids.push(did);
-  localStorage.setItem(KEYS.linkedDids, JSON.stringify(dids));
+  localStorage.setItem(getKeys(network).linkedDids, JSON.stringify(dids));
 }
 
-export function removeLinkedDid(did: string): void {
-  const dids = getLinkedDids().filter((d) => d.did !== did);
-  localStorage.setItem(KEYS.linkedDids, JSON.stringify(dids));
+export function removeLinkedDid(did: string, network: string): void {
+  const dids = getLinkedDids(network).filter((d) => d.did !== did);
+  localStorage.setItem(getKeys(network).linkedDids, JSON.stringify(dids));
 }
 
 // --- Agents ---
 
-export function getStoredAgents(): StoredAgent[] {
+export function getStoredAgents(network: string): StoredAgent[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = localStorage.getItem(KEYS.agents);
+    const raw = localStorage.getItem(getKeys(network).agents);
     return raw ? JSON.parse(raw) : [];
   } catch {
     return [];
   }
 }
 
-export function addStoredAgent(agent: StoredAgent): void {
-  const agents = getStoredAgents().filter(
+export function addStoredAgent(agent: StoredAgent, network: string): void {
+  const agents = getStoredAgents(network).filter(
     (a) => a.address.toLowerCase() !== agent.address.toLowerCase()
   );
   agents.push(agent);
-  localStorage.setItem(KEYS.agents, JSON.stringify(agents));
+  localStorage.setItem(getKeys(network).agents, JSON.stringify(agents));
 }
 
-export function removeStoredAgent(address: string): void {
-  const agents = getStoredAgents().filter(
+export function removeStoredAgent(address: string, network: string): void {
+  const agents = getStoredAgents(network).filter(
     (a) => a.address.toLowerCase() !== address.toLowerCase()
   );
-  localStorage.setItem(KEYS.agents, JSON.stringify(agents));
+  localStorage.setItem(getKeys(network).agents, JSON.stringify(agents));
 }

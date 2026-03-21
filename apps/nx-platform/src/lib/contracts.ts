@@ -483,15 +483,43 @@ export const NEXOID_MODULE_ABI = [
   },
 ] as const;
 
-export const USDT_ADDRESSES: Record<string, Address> = {
-  ethereum: "0xdAC17F958D2ee523a2206206994597C13D831ec7",
-  sepolia: "0xaA8E23Fb1079EA71e0a56F48a2aA51851D8433D0",
-  hardhat: "0xaA8E23Fb1079EA71e0a56F48a2aA51851D8433D0",
+export type NetworkName = "ethereum" | "sepolia" | "hardhat";
+
+// Per-network contract addresses and RPC URLs
+// Env vars override these defaults for the env-configured network
+export const NETWORK_CONFIG: Record<NetworkName, {
+  rpcUrl: string;
+  registryAddress: Address | null;
+  moduleAddress: Address | null;
+  tokenAddress: Address;
+}> = {
+  ethereum: {
+    rpcUrl: "https://ethereum-rpc.publicnode.com",
+    registryAddress: "0x74f7057413bba81d07372A8902Cd630EB44c4386" as Address,
+    moduleAddress: "0xa38B960f15BAc9117358068351428370BfE8Dc54" as Address,
+    tokenAddress: "0xdAC17F958D2ee523a2206206994597C13D831ec7" as Address, // Real USDT
+  },
+  sepolia: {
+    rpcUrl: process.env.NEXT_PUBLIC_RPC_URL ?? process.env.ETH_SEPOLIA_RPC_URL ?? "https://ethereum-sepolia-rpc.publicnode.com",
+    registryAddress: (process.env.NEXT_PUBLIC_REGISTRY_ADDRESS ?? "0x34bF67E80E4c6Cf6D41e90da9c2c072f0692172B") as Address,
+    moduleAddress: (process.env.NEXT_PUBLIC_MODULE_ADDRESS ?? "0x4903EEb232C30fb16447405D38FBe7841c677547") as Address,
+    tokenAddress: "0xaA8E23Fb1079EA71e0a56F48a2aA51851D8433D0" as Address,
+  },
+  hardhat: {
+    rpcUrl: "http://127.0.0.1:8545",
+    registryAddress: (process.env.NEXT_PUBLIC_REGISTRY_ADDRESS ?? "0x5FbDB2315678afecb367f032d93F642f64180aa3") as Address,
+    moduleAddress: (process.env.NEXT_PUBLIC_MODULE_ADDRESS ?? "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512") as Address,
+    tokenAddress: "0xaA8E23Fb1079EA71e0a56F48a2aA51851D8433D0" as Address,
+  },
 };
 
-export function getTokenAddress(): Address {
-  const network = process.env.NEXT_PUBLIC_NETWORK ?? "hardhat";
-  return (process.env.NEXT_PUBLIC_TOKEN_ADDRESS ?? USDT_ADDRESSES[network] ?? USDT_ADDRESSES.sepolia) as Address;
+function resolveNetwork(network?: string): NetworkName {
+  if (network && network in NETWORK_CONFIG) return network as NetworkName;
+  return (process.env.NEXT_PUBLIC_NETWORK ?? "hardhat") as NetworkName;
+}
+
+export function getTokenAddress(network?: string): Address {
+  return NETWORK_CONFIG[resolveNetwork(network)].tokenAddress;
 }
 
 export const ENTITY_TYPES = ["Human", "VirtualAgent", "PhysicalAgent", "Organization"] as const;
@@ -499,44 +527,37 @@ export const ENTITY_STATUSES = ["Active", "Suspended", "Revoked"] as const;
 export const AGENT_STATUSES = ["Active", "Suspended", "Revoked"] as const;
 export const DELEGATION_STATUSES = AGENT_STATUSES; // backward compat alias
 
-export function getChain(): Chain {
-  const networkName = process.env.NEXT_PUBLIC_NETWORK ?? "hardhat";
-  switch (networkName) {
-    case "ethereum":
-      return mainnet;
-    case "sepolia":
-      return sepolia;
-    default:
-      return hardhat;
+export function getChain(network?: string): Chain {
+  const name = resolveNetwork(network);
+  switch (name) {
+    case "ethereum": return mainnet;
+    case "sepolia": return sepolia;
+    default: return hardhat;
   }
 }
 
-export function getRpcUrl(): string {
-  return (
-    process.env.NEXT_PUBLIC_RPC_URL ??
-    process.env.ETH_SEPOLIA_RPC_URL ??
-    "http://127.0.0.1:8545"
-  );
+export function getRpcUrl(network?: string): string {
+  return NETWORK_CONFIG[resolveNetwork(network)].rpcUrl;
 }
 
-export function getRegistryAddress(): Address {
-  return (process.env.NEXT_PUBLIC_REGISTRY_ADDRESS ??
-    "0x5FbDB2315678afecb367f032d93F642f64180aa3") as Address;
+export function getRegistryAddress(network?: string): Address {
+  const config = NETWORK_CONFIG[resolveNetwork(network)];
+  return config.registryAddress ?? ("0x0000000000000000000000000000000000000000" as Address);
 }
 
-export function getModuleAddress(): Address {
-  return (process.env.NEXT_PUBLIC_MODULE_ADDRESS ??
-    "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512") as Address;
+export function getModuleAddress(network?: string): Address {
+  const config = NETWORK_CONFIG[resolveNetwork(network)];
+  return config.moduleAddress ?? ("0x0000000000000000000000000000000000000000" as Address);
 }
 
-export function getNexoidModuleAddress(): Address | undefined {
-  return (process.env.NEXT_PUBLIC_NEXOID_MODULE_ADDRESS ??
-    process.env.NEXT_PUBLIC_MODULE_ADDRESS) as Address | undefined;
+export function getNexoidModuleAddress(network?: string): Address | undefined {
+  const config = NETWORK_CONFIG[resolveNetwork(network)];
+  return config.moduleAddress ?? undefined;
 }
 
-export function getPublicClient(): PublicClient {
+export function getPublicClient(network?: string): PublicClient {
   return createPublicClient({
-    chain: getChain(),
-    transport: http(getRpcUrl()),
+    chain: getChain(network),
+    transport: http(getRpcUrl(network)),
   });
 }

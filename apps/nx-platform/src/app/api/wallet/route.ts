@@ -104,13 +104,14 @@ export async function GET(request: NextRequest) {
   const safeAddress = request.nextUrl.searchParams.get("safe") as Address | null;
   const eoaAddress = request.nextUrl.searchParams.get("eoa") as Address | null;
   const queryType = request.nextUrl.searchParams.get("type") ?? "operator";
+  const network = request.nextUrl.searchParams.get("network") ?? undefined;
 
   if (!safeAddress) {
     return NextResponse.json({ error: "Missing ?safe= parameter" }, { status: 400 });
   }
 
-  const publicClient = getPublicClient();
-  const tokenAddress = getTokenAddress();
+  const publicClient = getPublicClient(network);
+  const tokenAddress = getTokenAddress(network);
 
   try {
     // Fetch operator Safe balances and delegate allowances
@@ -133,7 +134,7 @@ export async function GET(request: NextRequest) {
     // Query both the Safe address and the EOA, since registerAgentSafe uses
     // msg.sender (the EOA) as the operator key in the contract.
     if (queryType === "operator") {
-      const nexoidModuleAddress = getNexoidModuleAddress();
+      const nexoidModuleAddress = getNexoidModuleAddress(network);
       if (nexoidModuleAddress) {
         type AgentRecord = { agentSafe: Address; agentEOA: Address; createdAt: bigint; scopeHash: `0x${string}`; credentialHash: `0x${string}`; validUntil: bigint; status: number };
 

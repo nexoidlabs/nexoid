@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useWallet } from "@/lib/wallet";
 
 interface Identity {
   address: string;
@@ -62,6 +63,7 @@ function ScoreRing({
 }
 
 export default function Dashboard() {
+  const { network } = useWallet();
   const [identities, setIdentities] = useState<Identity[]>([]);
   const [delegations, setDelegations] = useState<AgentRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -69,8 +71,8 @@ export default function Dashboard() {
 
   useEffect(() => {
     Promise.all([
-      fetch("/api/identities").then((r) => r.json()),
-      fetch("/api/delegations").then((r) => r.json()),
+      fetch(`/api/identities?network=${network}`).then((r) => r.json()),
+      fetch(`/api/delegations?network=${network}`).then((r) => r.json()),
     ])
       .then(([idData, delData]) => {
         setIdentities(idData.identities ?? []);
@@ -78,7 +80,7 @@ export default function Dashboard() {
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, []);
+  }, [network]);
 
   const humans = identities.filter((i) => i.entityType === "Human").length;
   const agents = identities.filter(
