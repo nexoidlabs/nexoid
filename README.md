@@ -17,15 +17,20 @@ Without these primitives, operators must either give agents unrestricted access 
 
 ## The Solution
 
-Nexoid provides a governed autonomy stack that sits between operators and their AI agents. A single WDK seed phrase (BIP-39) deterministically derives all keys — the operator's EOA and every agent's EOA — making the entire key hierarchy recoverable and auditable from one mnemonic.
+Nexoid is an identity, payment, and delegation infrastructure that turns AI agents into accountable economic actors on Ethereum. A single BIP-39 seed phrase (via Tether WDK) deterministically derives the operator's EOA and every agent's EOA — making the entire key hierarchy recoverable and auditable from one mnemonic.
 
-Each agent gets a registered on-chain identity, a Safe smart wallet with EVM-enforced spending limits, and the ability to generate cryptographic proofs of who it is and what it's allowed to do. Operators set budgets, scopes, and expiry — then let agents operate autonomously within those bounds.
+Each agent gets:
+
+- **A registered on-chain identity** — recorded in an IdentityRegistry contract on Ethereum, linked back to its operator
+- **Scoped delegation** — budget limits, per-transaction caps, and expiry recorded on-chain in the DelegationRegistry, with chain-breaking revocation (revoke one link, every downstream agent is instantly invalidated)
+- **A Safe smart wallet with EVM-enforced spending limits** — the AllowanceModule caps what each agent can spend per period. This is enforced by the EVM, not application logic. No prompt injection, no key theft, no bug can bypass it. An agent literally cannot overspend.
+- **Cryptographic identity proof** — EIP-712 signed proofs let agents prove who they are and what they're authorized to do, without revealing unnecessary information
 
 | Feature | Description |
 |---------|-------------|
-| **On-chain Identity** | Register operators and agents on the Ethereum IdentityRegistry |
-| **Scoped Delegation** | Flat operator-to-agent delegation with budget limits, max transaction amounts, and expiry |
-| **Safe Smart Wallets** | Operator funds held in Safe{Wallet} with AllowanceModule for per-agent spending limits |
+| **On-chain Identity** | Register operators and agents on the Ethereum IdentityRegistry, linked back to the operator |
+| **Scoped Delegation** | Budget limits, per-transaction caps, and expiry on-chain in the DelegationRegistry — with chain-breaking revocation |
+| **Safe Smart Wallets** | AllowanceModule caps per-agent spending per period, enforced by the EVM — no application-level bypass possible |
 | **WDK Key Derivation** | Tether WDK provides BIP-44 HD key derivation (m/44'/60'/0'/0/{index}) — deterministic, recoverable agent keys from a single seed |
 | **EIP-712 Identity Proof** | Agents generate verifiable cryptographic proofs of identity and delegation |
 | **Mobile Wallet** | React Native app for operators to manage agents, monitor balances, and approve transactions on the go |
