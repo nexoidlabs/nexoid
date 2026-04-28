@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="nexoid-logo.png" alt="Nexoid" width="360" />
+</p>
+
 # Nexoid — Governed Autonomy for AI Agents
 
 **On-chain identity, scoped delegation, Safe smart wallets with EVM-enforced spending limits, and cryptographic proofs — so operators can trust their agents to move real money.**
@@ -32,7 +36,7 @@ Four primitives, one protocol:
 
 **Open verification.** Trust anchors live on Ethereum. Any counterparty can verify independently via the open-source verification SDK — no Nexoid runtime dependency, no vendor lock-in.
 
-**Built for the agent stack.** Nexoid plugs into the protocols agents already use — [MCP](https://modelcontextprotocol.io) (Anthropic) as the agent-tool interface, and emerging payment standards like [x402](https://x402.org) (Coinbase) and AP2 (Google). Any MCP-compatible agent framework can connect to a governed tool surface without adopting a new protocol.
+**Built for the agent stack.** Nexoid plugs into the protocols agents already use — [MCP](https://modelcontextprotocol.io) (Anthropic) as the agent-tool interface, and emerging payment standards like [x402](https://x402.org) (Coinbase) and AP2 (Google). Any MCP-compatible agent framework can connect to a governed tool surface without adopting a new protocol — and for everything else, `nxcli` lets any agent runtime shell out to the same primitives.
 
 | Feature | Description |
 |---------|-------------|
@@ -46,7 +50,18 @@ Four primitives, one protocol:
 
 ## Architecture
 
-![NX System Architecture](architecture.png)
+![NX System Architecture](architecture-extended.png)
+
+Nexoid is organized as six modules with bottom-up trust inheritance — every layer extends the guarantees of the layer below, and agents interact only with the orchestration layer.
+
+| Module | Role |
+|--------|------|
+| **NX-Core** | Identity, delegation, and access primitives — `IdentityRegistry`, delegation management, payments, credential storage (IPFS), and Safe smart wallets |
+| **NX-Bridge** | External verification and credential sharing — KYA exchange, EIP-712 proofs, and (future) zero-knowledge proofs for selective disclosure |
+| **NX-CLI** | Orchestration and agent infrastructure — payments, identity, governance/requests, and SIWE auth; the gateway agents connect through |
+| **NX-Platform** | Full-featured web management — operator dashboard, task manager, and agent orchestration |
+| **NX-APP** | Lightweight mobile client — payment, identity, control, and 2FA / out-of-scope approvals |
+| **NX-OGI** | Open General Intelligence layer — showcase agents, agent runtime, and sandbox; plugs into NX-CLI |
 
 ### On-chain Contracts (Ethereum Mainnet & Sepolia)
 
