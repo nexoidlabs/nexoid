@@ -6,6 +6,10 @@
 
 **On-chain identity, scoped delegation, Safe smart wallets with EVM-enforced spending limits, and cryptographic proofs — so operators can trust their agents to move real money.**
 
+## Demo
+
+https://www.youtube.com/watch?v=3Ni5vfM9oqs
+
 ## The Problem
 
 AI agents are becoming economic actors. They trade on DEXes, execute procurement, pay for APIs, and settle invoices — billions of dollars already move through autonomous agents, and over half of internet traffic is now bots. But the infrastructure treats them as second-class citizens.
