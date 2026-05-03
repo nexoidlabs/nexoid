@@ -6,9 +6,10 @@
 
 **On-chain identity, scoped delegation, Safe smart wallets with EVM-enforced spending limits, and cryptographic proofs — so operators can trust their agents to move real money.**
 
-## Demo
+## Demo & Research
 
-https://www.youtube.com/watch?v=3Ni5vfM9oqs
+- **Demo video:** https://www.youtube.com/watch?v=3Ni5vfM9oqs
+- **Research paper:** [*Identity Infrastructure for Autonomous AI Agents: Threat Model, Requirements, and Reference Architecture*](https://zenodo.org/records/19919616) — Kirste & Fendt, 2026
 
 ## The Problem
 
