@@ -1,75 +1,78 @@
+<p align="center">
+  <img src="nexoid-logo.png" alt="Nexoid" width="360" />
+</p>
+
 # Nexoid — Governed Autonomy for AI Agents
 
-**On-chain identity, scoped delegation, Safe smart wallets with per-agent spending limits, and cryptographic identity proof — so operators can trust their agents to move real money.**
+**On-chain identity, scoped delegation, Safe smart wallets with EVM-enforced spending limits, and cryptographic proofs — so operators can trust their agents to move real money.**
 
-> Hackathon submission for [Tether Hackathon Galactica: WDK Edition 1](https://dorahacks.io/) — Track 1: Agent Wallets
+## Demo & Research
+
+- **Demo video:** https://www.youtube.com/watch?v=3Ni5vfM9oqs
+- **Research paper:** [*Identity Infrastructure for Autonomous AI Agents: Threat Model, Requirements, and Reference Architecture*](https://zenodo.org/records/19919616) — Kirste & Fendt, 2026
 
 ## The Problem
 
-AI agents are increasingly capable of autonomous decision-making, but today's infrastructure treats them as second-class citizens. There is no standard way for an agent to:
+AI agents are becoming economic actors. They trade on DEXes, execute procurement, pay for APIs, and settle invoices — billions of dollars already move through autonomous agents, and over half of internet traffic is now bots. But the infrastructure treats them as second-class citizens.
 
-- **Prove its identity** to a counterparty or service
-- **Spend money** within operator-defined guardrails
-- **Be held accountable** for its on-chain actions
-- **Derive keys deterministically** so operators can recover and audit agent wallets
+An operator deploying an agent today has two bad options: hand it a hot wallet and hope nothing goes wrong, or wrap every action in human approval. There is no middle ground because four foundational primitives are missing:
 
-Without these primitives, operators must either give agents unrestricted access to funds (dangerous) or manually approve every transaction (defeats the purpose of automation). The result: agents that can reason but cannot transact.
+| Gap | What's missing |
+|-----|----------------|
+| **Identity** | No standardized way to prove *who* authorized an agent, or trace it back to a real organization |
+| **Control** | All-or-nothing access — agents can either do everything or nothing |
+| **Financial Governance** | No pre-execution spending controls — budgets are checked *after* the damage |
+| **Audit** | No tamper-proof record of what the agent did, or under whose authority |
+
+These gaps compound. A procurement agent with a stolen API key can impersonate a legitimate buyer, exceed any budget, and leave no auditable trail — **one compromise, four failures, one incident.** Arup lost $25.6M to a single AI impersonation in 2024; no system could distinguish the attacker from a legitimate actor.
+
+The result: agents that can reason but cannot be trusted to transact.
 
 ## The Solution
 
-Nexoid is an identity, payment, and delegation infrastructure that turns AI agents into accountable economic actors on Ethereum. A single BIP-39 seed phrase (via Tether WDK) deterministically derives the operator's EOA and every agent's EOA — making the entire key hierarchy recoverable and auditable from one mnemonic.
+Nexoid is the identity, payment, and governance protocol for accountable AI agents on Ethereum. **One verification confirms** an agent's identity, delegation chain, scope, and spending limits — backed by EVM-enforced guardrails that no prompt injection or compromised key can bypass.
 
-Each agent gets:
+Four primitives, one protocol:
 
-- **A registered on-chain identity** — recorded in an IdentityRegistry contract on Ethereum, linked back to its operator
-- **Scoped delegation** — budget limits, per-transaction caps, and expiry recorded on-chain in the DelegationRegistry, with chain-breaking revocation (revoke one link, every downstream agent is instantly invalidated)
-- **A Safe smart wallet with EVM-enforced spending limits** — the AllowanceModule caps what each agent can spend per period. This is enforced by the EVM, not application logic. No prompt injection, no key theft, no bug can bypass it. An agent literally cannot overspend.
-- **Cryptographic identity proof** — EIP-712 signed proofs let agents prove who they are and what they're authorized to do, without revealing unnecessary information
+- **On-chain identity** — Operators and agents are registered in the `IdentityRegistry` contract, linked to a verifiable corporate delegation chain. Aligned with [ERC-8004](https://eips.ethereum.org/EIPS/eip-8004) for trustless agent identity.
+- **Scoped delegation** — Per-agent budget caps, per-transaction limits, and expiry recorded on-chain via the `NexoidModule`. Chain-breaking revocation: revoke one link and every downstream agent is invalidated in a single transaction, regardless of tree depth.
+- **EVM-enforced spending limits** — Every agent operates from a Safe smart wallet. The `AllowanceModule` caps what an agent can spend per period. **The limit is enforced by the EVM, not application logic.** No prompt injection, no key theft, no software bug can bypass it. An agent literally cannot overspend.
+- **Cryptographic proofs** — EIP-712 signed credentials let agents prove identity and authorization to counterparties without revealing operator details, budgets, or delegation internals. Selective disclosure by design.
+
+**Open verification.** Trust anchors live on Ethereum. Any counterparty can verify independently via the open-source verification SDK — no Nexoid runtime dependency, no vendor lock-in.
+
+**Built for the agent stack.** Nexoid plugs into the protocols agents already use — [MCP](https://modelcontextprotocol.io) (Anthropic) as the agent-tool interface, and emerging payment standards like [x402](https://x402.org) (Coinbase) and AP2 (Google). Any MCP-compatible agent framework can connect to a governed tool surface without adopting a new protocol — and for everything else, `nxcli` lets any agent runtime shell out to the same primitives.
 
 | Feature | Description |
 |---------|-------------|
-| **On-chain Identity** | Register operators and agents on the Ethereum IdentityRegistry, linked back to the operator |
-| **Scoped Delegation** | Budget limits, per-transaction caps, and expiry on-chain in the DelegationRegistry — with chain-breaking revocation |
-| **Safe Smart Wallets** | AllowanceModule caps per-agent spending per period, enforced by the EVM — no application-level bypass possible |
-| **WDK Key Derivation** | Tether WDK provides BIP-44 HD key derivation (m/44'/60'/0'/0/{index}) — deterministic, recoverable agent keys from a single seed |
-| **EIP-712 Identity Proof** | Agents generate verifiable cryptographic proofs of identity and delegation |
-| **Mobile Wallet** | React Native app for operators to manage agents, monitor balances, and approve transactions on the go |
+| **On-chain Identity** | Operators and agents registered in the `IdentityRegistry` on Ethereum, linked back to the operator |
+| **Scoped Delegation** | Budget limits, per-transaction caps, and expiry on-chain via `NexoidModule` — with chain-breaking revocation |
+| **Safe Smart Wallets** | `AllowanceModule` caps per-agent spending per period, enforced by the EVM — no application-level bypass possible |
+| **EIP-712 Identity Proof** | Agents generate verifiable cryptographic proofs of identity and delegation, with selective disclosure |
+| **Open Verification SDK** | TypeScript verification SDK — counterparties verify on-chain without depending on Nexoid infrastructure |
+| **MCP-native Control Plane** | Agents connect via Anthropic's Model Context Protocol; every action checked against delegation scope before execution |
+| **Mobile Wallet** | React Native app for operators to manage agents, monitor balances, and approve out-of-scope transactions |
 
 ## Architecture
 
-![NX System Architecture](architecture.png)
+![NX System Architecture](architecture-extended.png)
 
-```
-                          Tether WDK (BIP-39 Seed Phrase)
-                                      |
-                          BIP-44 HD Key Derivation
-                         m/44'/60'/0'/0/{index}
-                                      |
-                 +--------------------+--------------------+
-                 |                    |                    |
-            index 0              index 1              index 2
-         Operator EOA          Agent Alpha EOA       Agent Beta EOA
-                 |                    |                    |
-    +------------+-------+     +-----+-----+        +-----+-----+
-    |                    |     |           |        |           |
-  Safe{Wallet}     NX Platform |      Agent Safe   |      Agent Safe
-  (1-of-1)        (Dashboard)  |      (1-of-1)     |      (1-of-1)
-    |                          |           |        |           |
-    +--- USDT balance          |    100 USDT/day    |    50 USDT once
-    +--- AllowanceModule ------+--- per-agent ------+--- spending
-    +--- NexoidModule              limits                limits
-              |
-    +---------+---------+
-    |         |         |
- register  suspend   revoke
-  agents    agents    agents
-```
+Nexoid is organized as six modules with bottom-up trust inheritance — every layer extends the guarantees of the layer below, and agents interact only with the orchestration layer.
 
-### On-chain Contracts (Ethereum Sepolia)
+| Module | Role |
+|--------|------|
+| **NX-Core** | Identity, delegation, and access primitives — `IdentityRegistry`, delegation management, payments, credential storage (IPFS), and Safe smart wallets |
+| **NX-Bridge** | External verification and credential sharing — KYA exchange, EIP-712 proofs, and (future) zero-knowledge proofs for selective disclosure |
+| **NX-CLI** | Orchestration and agent infrastructure — payments, identity, governance/requests, and SIWE auth; the gateway agents connect through |
+| **NX-Platform** | Full-featured web management — operator dashboard, task manager, and agent orchestration |
+| **NX-APP** | Lightweight mobile client — payment, identity, control, and 2FA / out-of-scope approvals |
+| **NX-OGI** | Open General Intelligence layer — showcase agents, agent runtime, and sandbox; plugs into NX-CLI |
+
+### On-chain Contracts (Ethereum Mainnet & Sepolia)
 
 ```
 +---------------------+     +---------------------+     +---------------------+
-|  IdentityRegistry   |     |    NexoidModule      |     |  AllowanceModule    |
+|  IdentityRegistry   |     |    NexoidModule     |     |  AllowanceModule    |
 |---------------------|     |---------------------|     |---------------------|
 | registerIdentity()  |     | registerAgentSafe() |     | addDelegate()       |
 | getIdentity()       |     | suspendAgent()      |     | setAllowance()      |
@@ -89,13 +92,10 @@ Each agent gets:
 ```
 Operator                        On-chain                         Agent
    |                               |                               |
-   |-- WDK init (seed phrase) ---->|                               |
-   |   [derives all keys]          |                               |
-   |                               |                               |
-   |-- registerIdentity() ------->| IdentityRegistry              |
-   |-- registerAgentSafe() ------>| NexoidModule                  |
-   |-- addDelegate() ------------>| AllowanceModule               |
-   |-- setAllowance(USDT,100) --->| AllowanceModule               |
+   |-- registerIdentity() -------->| IdentityRegistry              |
+   |-- registerAgentSafe() ------->| NexoidModule                  |
+   |-- addDelegate() ------------->| AllowanceModule               |
+   |-- setAllowance(USDT,100) ---->| AllowanceModule               |
    |                               |                               |
    |                               |<-- executeAllowanceTransfer() |
    |                               |    [spends within limit]      |
@@ -104,34 +104,17 @@ Operator                        On-chain                         Agent
    |<-- monitor via NX Wallet -----|                               |
 ```
 
-### Where Tether WDK is Used
-
-Every on-chain action flows through WDK: deriving keys, signing transactions, executing USDT transfers, and wrapping accounts as EIP-1193 providers for Safe SDK compatibility.
-
-| Layer | WDK Role |
-|-------|----------|
-| **Key Derivation** | BIP-44 HD path `m/44'/60'/0'/0/{index}` — single seed phrase deterministically derives operator EOA (index 0) and every agent EOA (index 1+). All keys are recoverable from one mnemonic. |
-| **Transaction Signing** | `account.sendTransaction()` signs and broadcasts all on-chain transactions — identity registration, agent Safe deployment, delegation, allowance configuration. WDK manages nonce, gas estimation, and submission. |
-| **USDT Transfers** | `account.sendTransaction({ to, data })` executes ERC-20 `transfer()` calls for USDT spending within allowance limits. WDK handles ABI encoding, gas estimation, and transaction receipt tracking. |
-| **EIP-1193 Provider** | `WDKProviderAdapter` wraps the WDK account as a standard EIP-1193 provider, enabling Safe Protocol Kit integration. Handles `eth_signTypedData_v4` (Safe transaction signatures), `personal_sign` (message signing), `eth_sendTransaction` (broadcast), and `eth_accounts`/`eth_chainId` queries. |
-| **Balance Queries** | `WalletManagerEvm.getBalance()` and token balance lookups provide real-time ETH and USDT balance information across operator and agent wallets. |
-| **Safe Smart Wallets** | WDK-derived EOA serves as the sole signer (1-of-1) for both operator and agent Safe wallets. Safe Protocol Kit delegates all signing to WDK via the EIP-1193 adapter. |
-| **NX Wallet (mobile)** | `WDKService` initializes WDK with seed, registers `ethereum` chain via `WalletManagerEvm`. Provides address derivation, transaction signing, USDT transfers, and fee estimation to the React Native UI. |
-| **NX Platform (dashboard)** | WDK derives operator keys and signs Safe module transactions (agent registration, suspension, revocation). |
-| **Core Client SDK** | `NexoidClient.fromSeedPhrase()` uses WDK for deterministic key derivation across all agent indices, enabling programmatic agent management. |
-| **CLI (nxcli)** | Agent creation, delegation, allowance setting, and USDT sending — all signed and broadcast via WDK. |
-
 ## Project Structure
 
 ```
 packages/
   nx-core/        — Solidity contracts + TypeScript wrappers
-  core-client/    — NexoidClient SDK (identity, delegation, wallet, proof, WDK)
+  core-client/    — NexoidClient SDK (identity, delegation, wallet, proof)
   nx-cli/         — CLI tool (nxcli)
 apps/
   nx-platform/    — Operator dashboard (Next.js)
   nx-verify/      — Public identity explorer & proof verifier (Next.js)
-  nx-wallet/      — Mobile wallet app (React Native / Expo, WDK + Safe)
+  nx-wallet/      — Mobile wallet app (React Native / Expo, Safe)
 scripts/          — Demo setup scripts (01-07)
 demo/             — Agent demo scenario
 ```
@@ -170,7 +153,7 @@ nxcli init --rpc-url https://ethereum-sepolia-rpc.publicnode.com \
 # Register identity + deploy Safe
 nxcli register
 
-# Create an agent (WDK-derived key)
+# Create an agent
 nxcli agent create --label "Agent Alpha"
 
 # Delegate scope to agent
@@ -194,14 +177,25 @@ nxcli request-funds --amount 500 --reason "API subscription payment"
 | Component | Technology |
 |-----------|-----------|
 | Smart Contracts | Solidity 0.8.24, Hardhat |
-| Wallet SDK | Tether WDK (BIP-44 HD derivation via ethers.js v6) |
 | Smart Wallet | Safe{Wallet} Protocol Kit v6.1.2 + AllowanceModule |
-| Client SDK | TypeScript, viem v2.21 |
+| Client SDK | TypeScript, viem v2.21, ethers.js v6 |
 | CLI | Commander.js, chalk |
 | Dashboard | Next.js 15, React 19, viem |
-| Mobile Wallet | React Native (Expo 54), WDK + Safe Protocol Kit, ethers.js v6 |
+| Mobile Wallet | React Native (Expo 54), Safe Protocol Kit, ethers.js v6 |
+| Agent Interface | MCP (Model Context Protocol) |
+| Identity Standard | ERC-8004 alignment, EIP-712 proofs |
 | Chain | Ethereum Mainnet / Sepolia |
 | Token | USDT (Tether USD) |
+
+## Standards Alignment
+
+| Standard | Creator | Status | Use in Nexoid |
+|----------|---------|--------|---------------|
+| **ERC-8004** (Trustless Agents) | MetaMask, Ethereum Foundation, Google, Coinbase | Draft ERC | Identity registry alignment |
+| **MCP** (Model Context Protocol) | Anthropic | Production | Control Plane / agent gateway protocol |
+| **EIP-712** (Typed signed data) | Ethereum | Final | Agent identity & delegation proofs |
+| **x402** (Agent Payments) | Coinbase | Production | Payment integration target |
+| **AP2** (Agent Payments) | Google | Developer preview | Future payment integration |
 
 ## Environment Variables
 
@@ -210,7 +204,7 @@ Copy `.env.example` to `.env` and fill in values. Key variables:
 ```
 DEPLOYER_PRIVATE_KEY=     # For contract deployment
 NEXOID_PRIVATE_KEY=       # For CLI operations
-NEXOID_SEED_PHRASE=       # WDK seed phrase (BIP-39)
+ETH_MAINNET_RPC_URL=      # Ethereum Mainnet RPC
 ETH_SEPOLIA_RPC_URL=      # Ethereum Sepolia RPC
 ```
 
